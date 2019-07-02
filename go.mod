@@ -1,4 +1,4 @@
-module dcl-viper
+module github.com/decentraland/dcl-viper
 
 go 1.12
 
