@@ -1,14 +1,14 @@
 package validation
 
 import (
-"errors"
-"strings"
+	"errors"
+	"strings"
 
-"github.com/go-playground/locales/en"
-ut "github.com/go-playground/universal-translator"
-"github.com/sirupsen/logrus"
-"gopkg.in/go-playground/validator.v9"
-enTranslations "gopkg.in/go-playground/validator.v9/translations/en"
+	"github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/go-playground/validator.v9"
+	enTranslations "gopkg.in/go-playground/validator.v9/translations/en"
 )
 
 type Validator interface {
@@ -84,4 +84,3 @@ func translateErrors(errs []validator.FieldError, t ut.Translator) error {
 	logrus.Debugf("Validation error: %s", err.Error())
 	return err
 }
-
