@@ -1,10 +1,10 @@
 package config
 
 import (
-	"dcl-viper/internal/validation"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/decentraland/dcl-viper/internal/validation"
 	"reflect"
 
 	"github.com/spf13/viper"
