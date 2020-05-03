@@ -4,7 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/decentraland/dcl-viper/internal/validation"
+	"github.com/m-sossich/gonphig/internal/validation"
 	"reflect"
 
 	"github.com/spf13/viper"
