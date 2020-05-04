@@ -30,7 +30,7 @@ if err := config.ReadConfiguration("path/to/file", &conf); err != nil {
 
 ```
 
-Dcl-viper will take care of the flag declaration and the `flag.Parse()` for you when it reads the configuration
+Gonphig will take care of the flag declaration and the `flag.Parse()` for you when it reads the configuration
 
 ### Read configuration from ENV variables
 
