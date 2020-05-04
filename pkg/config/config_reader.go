@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	overwriteEnvKey  = "overwrite-env"
-	overwriteFlagKey = "overwrite-flag"
-	flagUsage        = "flag-usage"
+	readEnvKey  = "env"
+	readFlagKey = "flag"
+	flagUsage   = "flag-usage"
 )
 
 func ReadConfiguration(configPath string, c interface{}) error {
@@ -100,14 +100,14 @@ func overwriteFields(parent string, f reflect.StructField, v *viper.Viper) error
 func overwriteValue(prefix string, f reflect.StructField, v *viper.Viper, setFlag func(v *viper.Viper, flagVal string, key string, usage string)) error {
 	tag := f.Tag
 	if len(tag) > 0 {
-		val, ok := tag.Lookup(overwriteEnvKey)
+		val, ok := tag.Lookup(readEnvKey)
 		if ok {
 			err := v.BindEnv(prefix+f.Name, val)
 			if err != nil {
 				return err
 			}
 		}
-		val, ok = tag.Lookup(overwriteFlagKey)
+		val, ok = tag.Lookup(readFlagKey)
 		if ok {
 			key := prefix + f.Name
 			setFlag(v, val, key, getUsage(tag))
