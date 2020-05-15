@@ -1,4 +1,5 @@
-# Gonphig ![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master)
+# Gonphig <img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/gopher-beard.png" height="40">
+![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master)
 
 Read Configurations from different sources
 
