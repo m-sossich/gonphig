@@ -1,4 +1,4 @@
-# Gonphig
+# Gonphig ![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master)
 
 Read Configurations from different sources
 
@@ -94,7 +94,3 @@ type Conf struct {
 
 ### Validations
 * To perform validations on the configuration struct, We are using an external library. All information can be found [here](https://github.com/go-playground/validator/tree/v9)
-
-
-# Licence
-Original work under the [Decentraland](https://decentraland.org/) organization
