@@ -10,11 +10,13 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 const (
 	readEnvKey  = "env"
 	readFlagKey = "flag"
+	defaultKey  = "default"
 	flagUsage   = "flag-usage"
 )
 
@@ -113,92 +115,134 @@ func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(v *re
 }
 
 func setString(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readEnvKey)
+	val, ok := t.Lookup(readFlagKey)
+	if ok {
+		flag.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
+		return nil
+	}
+	val, ok = t.Lookup(readEnvKey)
 	if ok {
 		variable := os.Getenv(val)
 		if len(variable) > 0 {
 			v.SetString(os.Getenv(val))
+			return nil
 		}
 	}
-	val, ok = t.Lookup(readFlagKey)
-	if ok {
-		flag.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
+	if def, ok := t.Lookup(defaultKey); ok && def != "" {
+		v.SetString(strings.TrimSpace(def))
 	}
 	return nil
 }
 
 func setBool(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readEnvKey)
-	if ok {
-		variable := os.Getenv(val)
-		if len(variable) > 0 {
-			parsed, err := strconv.ParseBool(os.Getenv(val))
-			if err != nil {
-				return err
-			}
-			v.SetBool(parsed)
-		}
-	}
-	val, ok = t.Lookup(readFlagKey)
+	val, ok := t.Lookup(readFlagKey)
 	if ok {
 		flag.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
+		return nil
+	}
+	val, ok = t.Lookup(readEnvKey)
+	if ok {
+		value := os.Getenv(val)
+		if len(value) > 0 {
+			return parseBool(v, value)
+		}
+	}
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseBool(v, strings.ToLower(def))
+	}
+	return nil
+}
+
+func parseBool(v *reflect.Value, val string) error {
+	trimmed := strings.TrimSpace(val)
+	if len(trimmed) > 0 {
+		parsed, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return err
+		}
+		v.SetBool(parsed)
 	}
 	return nil
 }
 
 func setInt64(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readEnvKey)
-	if ok {
-		variable := os.Getenv(val)
-		if len(variable) > 0 {
-			parsed, err := strconv.ParseInt(os.Getenv(val), 10, 64)
-			if err != nil {
-				return err
-			}
-			v.SetInt(parsed)
-		}
-	}
-	val, ok = t.Lookup(readFlagKey)
+	val, ok := t.Lookup(readFlagKey)
 	if ok {
 		flag.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
+		return nil
+	}
+	val, ok = t.Lookup(readEnvKey)
+	if ok {
+		value := os.Getenv(val)
+		if len(value) > 0 {
+			return parseInt64(v, value)
+		}
+	}
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseInt64(v, def)
 	}
 	return nil
 }
 
 func setInt(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readEnvKey)
-	if ok {
-		variable := os.Getenv(val)
-		if len(variable) > 0 {
-			parsed, err := strconv.ParseInt(os.Getenv(val), 10, 64)
-			if err != nil {
-				return err
-			}
-			v.SetInt(parsed)
-		}
-	}
-	val, ok = t.Lookup(readFlagKey)
+	val, ok := t.Lookup(readFlagKey)
 	if ok {
 		flag.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
+		return nil
+	}
+	val, ok = t.Lookup(readEnvKey)
+	if ok {
+		value := os.Getenv(val)
+		if len(value) > 0 {
+			return parseInt64(v, value)
+		}
+	}
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseInt64(v, def)
+	}
+	return nil
+}
+
+func parseInt64(v *reflect.Value, val string) error {
+	trimmed := strings.TrimSpace(val)
+	if len(trimmed) > 0 {
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return err
+		}
+		v.SetInt(parsed)
 	}
 	return nil
 }
 
 func setFloat64(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readEnvKey)
-	if ok {
-		variable := os.Getenv(val)
-		if len(variable) > 0 {
-			parsed, err := strconv.ParseFloat(os.Getenv(val), 64)
-			if err != nil {
-				return err
-			}
-			v.SetFloat(parsed)
-		}
-	}
-	val, ok = t.Lookup(readFlagKey)
+	val, ok := t.Lookup(readFlagKey)
 	if ok {
 		flag.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
+		return nil
+	}
+	val, ok = t.Lookup(readEnvKey)
+	if ok {
+		value := os.Getenv(val)
+		if len(value) > 0 {
+			return parseFloat64(v, value)
+		}
+	}
+
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseFloat64(v, def)
+	}
+	return nil
+}
+
+func parseFloat64(v *reflect.Value, val string) error {
+	trimmed := strings.TrimSpace(val)
+	if len(trimmed) > 0 {
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return err
+		}
+		v.SetFloat(parsed)
 	}
 	return nil
 }
