@@ -76,29 +76,22 @@ func overwriteFields(f reflect.StructField, v *reflect.Value) error {
 		}
 
 	case reflect.Int64:
-		if err := overwriteValue(f, v, setInt64); err != nil {
-			return err
-		}
+		return overwriteValue(f, v, setInt64)
 
 	case reflect.Int:
-		if err := overwriteValue(f, v, setInt); err != nil {
-			return err
-		}
+		return overwriteValue(f, v, setInt)
 
 	case reflect.Float32, reflect.Float64:
-		if err := overwriteValue(f, v, setFloat64); err != nil {
-			return err
-		}
+		return overwriteValue(f, v, setFloat64)
 
 	case reflect.String:
-		if err := overwriteValue(f, v, setString); err != nil {
-			return err
-		}
+		return overwriteValue(f, v, setString)
 
 	case reflect.Bool:
-		if err := overwriteValue(f, v, setBool); err != nil {
-			return err
-		}
+		return overwriteValue(f, v, setBool)
+
+	case reflect.Slice:
+		return overwriteValue(f, v, identity)
 
 	default:
 		return fmt.Errorf("invalid field[%s] type[%s]", f.Name, f.Type.Name())
@@ -232,6 +225,10 @@ func setFloat64(v *reflect.Value, t reflect.StructTag) error {
 	if def, ok := t.Lookup(defaultKey); ok {
 		return parseFloat64(v, def)
 	}
+	return nil
+}
+
+func identity(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
