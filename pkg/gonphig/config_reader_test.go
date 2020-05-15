@@ -33,7 +33,7 @@ type withFlagsConfig struct {
 
 func TestReadConfigFromFile(t *testing.T) {
 	var config parentConfig
-	err := ReadConfiguration(configTestFile, &config)
+	err := ReadFromFile(configTestFile, &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Hello", config.Field)
@@ -47,7 +47,7 @@ func TestReadConfigFromEnvs(t *testing.T) {
 	os.Setenv("bool-env", "false")
 
 	var config parentConfig
-	err := ReadConfiguration(configTestFile, &config)
+	err := ReadFromFile(configTestFile, &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bye!", config.Field)
@@ -61,7 +61,7 @@ func TestReadConfigFromFlags(t *testing.T) {
 	os.Args = append(os.Args, "--bool-flag=true")
 
 	var config withFlagsConfig
-	err := ReadConfiguration(configTestFile, &config)
+	err := ReadFromFile(configTestFile, &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "DUDE", config.Field)
@@ -73,7 +73,7 @@ func TestWrongFlagTypeMessage(t *testing.T) {
 	if os.Getenv("WRONG-FLAG-VALUE") == "1" {
 		os.Args = append(os.Args, "--int-flag=notAnInt")
 		var config withFlagsConfig
-		_ = ReadConfiguration(configTestFile, &config)
+		_ = ReadFromFile(configTestFile, &config)
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=TestWrongFlagTypeMessage")
@@ -83,4 +83,18 @@ func TestWrongFlagTypeMessage(t *testing.T) {
 		return
 	}
 	t.Fatal("gonphig loading should have failed due to  the wrong flag argument was used")
+}
+
+func TestReadConfig(t *testing.T) {
+	os.Setenv("string-env", "Bye!")
+	os.Setenv("int-env", "100")
+	os.Setenv("bool-env", "false")
+
+	var config parentConfig
+	err := ReadConfig(&config)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bye!", config.Field)
+	assert.Equal(t, 100, config.Child.Int)
+	assert.Equal(t, false, config.Child.Child.Bool)
 }

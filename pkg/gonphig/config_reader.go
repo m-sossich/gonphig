@@ -18,7 +18,19 @@ const (
 	flagUsage   = "flag-usage"
 )
 
-func ReadConfiguration(configPath string, c interface{}) error {
+func ReadFromFile(configPath string, c interface{}) error {
+	configFile, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	err = yaml.Unmarshal(configFile, c)
+	if err != nil {
+		return err
+	}
+	return ReadConfig(c)
+}
+
+func ReadConfig(c interface{}) error {
 	t := reflect.TypeOf(c)
 
 	v, err := validation.WithMessages(map[string]string{"required": "missing required configuration: {0}"})
@@ -28,15 +40,6 @@ func ReadConfiguration(configPath string, c interface{}) error {
 
 	switch t.Kind() {
 	case reflect.Ptr, reflect.Interface:
-		configFile, err := ioutil.ReadFile(configPath)
-		if err != nil {
-			return err
-		}
-		err = yaml.Unmarshal(configFile, c)
-		if err != nil {
-			return err
-		}
-
 		val := t.Elem()
 		fields := val.NumField()
 		for i := 0; i < fields; i++ {
