@@ -8,7 +8,7 @@ type Conf struct {
 }
 ...
 var conf ProfileConfig
-if err := config.ReadConfiguration("path/to/file", &conf); err != nil {
+if err := gonphig.ReadConfiguration("path/to/file.yml", &conf); err != nil {
 	log.Fatal(err)
 }
 ```
@@ -24,7 +24,7 @@ type Conf struct {
 
 ...
 var conf ProfileConfig
-if err := config.ReadConfiguration("path/to/file", &conf); err != nil {
+if err := gonphig.ReadConfiguration("path/to/file.yml", &conf); err != nil {
 	log.Fatal(err)
 
 
@@ -43,10 +43,10 @@ type Conf struct {
 
 ...
 var conf ProfileConfig
-if err := config.ReadConfiguration("path/to/file", &conf); err != nil {
+if err := gonphig.ReadConfiguration("path/to/file.yml", &conf); err != nil {
 	log.Fatal(err)
 }
 
 ```
 # Licence
-Original work was done under the [dcl-viper](https://github.com/decentraland/dcl-viper) name. Part of the [Decentraland](https://decentraland.org/) project
+Original work under the [Decentraland](https://decentraland.org/) organization

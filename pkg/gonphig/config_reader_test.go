@@ -1,4 +1,4 @@
-package config
+package gonphig
 
 import (
 	"os"
@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const configTestFile = "config-test"
+const configTestFile = "config-test.yml"
 
 type parentConfig struct {
 	Field string `env:"string-env"`
 	Child struct {
-		IntField int `env:"int-env"`
-		Child    struct {
-			BoolField bool `env:"bool-env"`
+		Int   int `env:"int-env"`
+		Child struct {
+			Bool bool `env:"bool-env"`
 		}
 	}
 }
@@ -24,9 +24,9 @@ type parentConfig struct {
 type withFlagsConfig struct {
 	Field string `flag:"string-flag"`
 	Child struct {
-		IntField int `flag:"int-flag"`
-		Child    struct {
-			BoolField bool `flag:"bool-flag"`
+		Int   int `flag:"int-flag"`
+		Child struct {
+			Bool bool `flag:"bool-flag"`
 		}
 	}
 }
@@ -37,8 +37,8 @@ func TestReadConfigFromFile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Hello", config.Field)
-	assert.Equal(t, 1, config.Child.IntField)
-	assert.Equal(t, true, config.Child.Child.BoolField)
+	assert.Equal(t, 1, config.Child.Int)
+	assert.Equal(t, true, config.Child.Child.Bool)
 }
 
 func TestReadConfigFromEnvs(t *testing.T) {
@@ -51,8 +51,8 @@ func TestReadConfigFromEnvs(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bye!", config.Field)
-	assert.Equal(t, 100, config.Child.IntField)
-	assert.Equal(t, false, config.Child.Child.BoolField)
+	assert.Equal(t, 100, config.Child.Int)
+	assert.Equal(t, false, config.Child.Child.Bool)
 }
 
 func TestReadConfigFromFlags(t *testing.T) {
@@ -65,8 +65,8 @@ func TestReadConfigFromFlags(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "DUDE", config.Field)
-	assert.Equal(t, 10000, config.Child.IntField)
-	assert.Equal(t, true, config.Child.Child.BoolField)
+	assert.Equal(t, 10000, config.Child.Int)
+	assert.Equal(t, true, config.Child.Child.Bool)
 }
 
 func TestWrongFlagTypeMessage(t *testing.T) {
@@ -82,5 +82,5 @@ func TestWrongFlagTypeMessage(t *testing.T) {
 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
 		return
 	}
-	t.Fatal("config loading should have failed due to  the wrong flag argument was used")
+	t.Fatal("gonphig loading should have failed due to  the wrong flag argument was used")
 }

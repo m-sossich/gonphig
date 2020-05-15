@@ -1,6 +1,0 @@
-field: "Hello"
-
-child:
-  intField: 1
-  child:
-    boolField: true
