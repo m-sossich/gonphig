@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/logo.png" width="400"></p>
+# <p align="center"><img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/logo.png" width="450"></p>
 
 <p align="right"> 
 
