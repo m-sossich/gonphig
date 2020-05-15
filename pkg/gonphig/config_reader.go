@@ -90,7 +90,7 @@ func overwriteFields(f reflect.StructField, v *reflect.Value) error {
 	case reflect.Bool:
 		return overwriteValue(f, v, setBool)
 
-	case reflect.Slice:
+	case reflect.Slice, reflect.Map:
 		return overwriteValue(f, v, identity)
 
 	default:
