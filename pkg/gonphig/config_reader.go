@@ -56,10 +56,9 @@ func ReadConfig(c interface{}) error {
 
 		return v.ValidateStruct(c)
 	case reflect.Struct:
-		return errors.New("configuration to load need to be a pointer")
+		return errors.New("configuration to load needs to be a pointer")
 	default:
 		return errors.New("invalid configuration structure")
-
 	}
 }
 
@@ -108,13 +107,11 @@ func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(v *re
 }
 
 func setString(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readFlagKey)
-	if ok {
+	if val, ok := t.Lookup(readFlagKey); ok {
 		flag.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
 		return nil
 	}
-	val, ok = t.Lookup(readEnvKey)
-	if ok {
+	if val, ok := t.Lookup(readEnvKey); ok {
 		variable := os.Getenv(val)
 		if len(variable) > 0 {
 			v.SetString(os.Getenv(val))
@@ -128,13 +125,11 @@ func setString(v *reflect.Value, t reflect.StructTag) error {
 }
 
 func setBool(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readFlagKey)
-	if ok {
+	if val, ok := t.Lookup(readFlagKey); ok {
 		flag.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
 		return nil
 	}
-	val, ok = t.Lookup(readEnvKey)
-	if ok {
+	if val, ok := t.Lookup(readEnvKey); ok {
 		value := os.Getenv(val)
 		if len(value) > 0 {
 			return parseBool(v, value)
@@ -159,13 +154,11 @@ func parseBool(v *reflect.Value, val string) error {
 }
 
 func setInt64(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readFlagKey)
-	if ok {
+	if val, ok := t.Lookup(readFlagKey); ok {
 		flag.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
 		return nil
 	}
-	val, ok = t.Lookup(readEnvKey)
-	if ok {
+	if val, ok := t.Lookup(readEnvKey); ok {
 		value := os.Getenv(val)
 		if len(value) > 0 {
 			return parseInt64(v, value)
@@ -178,13 +171,11 @@ func setInt64(v *reflect.Value, t reflect.StructTag) error {
 }
 
 func setInt(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readFlagKey)
-	if ok {
+	if val, ok := t.Lookup(readFlagKey); ok {
 		flag.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
 		return nil
 	}
-	val, ok = t.Lookup(readEnvKey)
-	if ok {
+	if val, ok := t.Lookup(readEnvKey); ok {
 		value := os.Getenv(val)
 		if len(value) > 0 {
 			return parseInt64(v, value)
@@ -209,19 +200,16 @@ func parseInt64(v *reflect.Value, val string) error {
 }
 
 func setFloat64(v *reflect.Value, t reflect.StructTag) error {
-	val, ok := t.Lookup(readFlagKey)
-	if ok {
+	if val, ok := t.Lookup(readFlagKey); ok {
 		flag.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
 		return nil
 	}
-	val, ok = t.Lookup(readEnvKey)
-	if ok {
+	if val, ok := t.Lookup(readEnvKey); ok {
 		value := os.Getenv(val)
 		if len(value) > 0 {
 			return parseFloat64(v, value)
 		}
 	}
-
 	if def, ok := t.Lookup(defaultKey); ok {
 		return parseFloat64(v, def)
 	}
