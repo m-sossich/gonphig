@@ -1,6 +1,8 @@
-#<img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/logo.png">
+<p align="center"><img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/logo.png"></p>
+
 ![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master)
 
+## What is this for?
 Read Configurations from different sources
 
 ## How to use it
