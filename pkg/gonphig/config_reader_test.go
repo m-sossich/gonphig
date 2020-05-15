@@ -10,6 +10,7 @@ import (
 )
 
 const configTestFile = "config-test.yml"
+const configArraysTestFile = "config-arrays.yml"
 
 type parentConfig struct {
 	Field string `env:"string-env"`
@@ -207,4 +208,16 @@ func TestReadValueOrder(t *testing.T) {
 	assert.Equal(t, 1, config.IntA)
 	assert.Equal(t, 2, config.IntB)
 	assert.Equal(t, 3, config.IntC)
+}
+
+func TestReadArraysFromConfigFromFile(t *testing.T) {
+	type testType struct {
+		Something []string
+	}
+
+	var config testType
+	err := ReadFromFile(configArraysTestFile, &config)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, len(config.Something))
 }
