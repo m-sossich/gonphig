@@ -98,3 +98,59 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, 100, config.Child.Int)
 	assert.Equal(t, false, config.Child.Child.Bool)
 }
+
+func TestRequiredFields(t *testing.T) {
+	type testRequired struct {
+		Field string `env:"string-req-env" validate:"required"`
+	}
+
+	var config testRequired
+	err := ReadConfig(&config)
+	require.Error(t, err)
+	assert.Equal(t, "missing required configuration: Field", err.Error())
+
+	os.Setenv("string-req-env", "Bye!")
+	var ok testRequired
+	err = ReadConfig(&ok)
+
+	assert.Equal(t, "Bye!", ok.Field)
+
+	type testNotRequired struct {
+		Field string `env:"other-env"`
+	}
+
+	var notRequired testNotRequired
+	err = ReadConfig(&notRequired)
+	require.NoError(t, err)
+	assert.Equal(t, "", notRequired.Field)
+}
+
+func TestIntFamily(t *testing.T) {
+	type testType struct {
+		Int   int   `env:"int-env"`
+		Int64 int64 `env:"int64-env"`
+	}
+	os.Setenv("int-env", "100")
+	os.Setenv("int64-env", "10000")
+
+	var config testType
+	err := ReadConfig(&config)
+	require.NoError(t, err)
+	assert.Equal(t, 100, config.Int)
+	assert.Equal(t, int64(10000), config.Int64)
+}
+
+func TestFloatFamily(t *testing.T) {
+	type testType struct {
+		Float32	float32   `env:"float32-env"`
+		Float64 float64 `env:"float64-env"`
+	}
+	os.Setenv("float32-env", "100.01")
+	os.Setenv("float64-env", "10000.01")
+
+	var config testType
+	err := ReadConfig(&config)
+	require.NoError(t, err)
+	assert.Equal(t, float32(100.01), config.Float32)
+	assert.Equal(t, 10000.01, config.Float64)
+}
