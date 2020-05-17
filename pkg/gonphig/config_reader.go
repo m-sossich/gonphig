@@ -14,12 +14,18 @@ import (
 )
 
 const (
-	readEnvKey  = "env"
+	// Use the 'env' tag to mark than an attribute might be overwritten if such env-var is set
+	readEnvKey = "env"
+	// Use the 'flag' tag to mark than an attribute might be overwritten if such flag is set
 	readFlagKey = "flag"
-	defaultKey  = "default"
-	flagUsage   = "flag-usage"
+	// Use the 'default' tag set a default value for an attribute
+	defaultKey = "default"
+	// Use the 'flag-usage' to add a description for the expected flag. This is optional
+	flagUsage = "flag-usage"
 )
 
+// ReadFromFile loads configurations into the config struct provided.
+// Default values from the given yaml file. If indicated, the values might be overwritten by a env-var or flag
 func ReadFromFile(configPath string, c interface{}) error {
 	configFile, err := ioutil.ReadFile(configPath)
 	if err != nil {
@@ -32,6 +38,8 @@ func ReadFromFile(configPath string, c interface{}) error {
 	return ReadConfig(c)
 }
 
+// ReadConfig loads configurations into the config struct provided. Default should be provided using the 'default' tag.
+// If indicated, the values might be overwritten by a env-var or flag
 func ReadConfig(c interface{}) error {
 	t := reflect.TypeOf(c)
 

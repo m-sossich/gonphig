@@ -1,10 +1,8 @@
 # <p align="center"><img src="https://raw.githubusercontent.com/m-sossich/gonphig/master/.github/logo.png" width="300"></p>
-
-<p align="right"> 
-
 ![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master) 
+[![Go Report Card](https://goreportcard.com/badge/github.com/m-sossich/gonphig)](https://goreportcard.com/report/github.com/m-sossich/gonphig)
+[![](https://godoc.org/github.com/tendermint/iavl?status.svg)](https://pkg.go.dev/github.com/m-sossich/gonphig/pkg/gonphig)
 
-</p>
 
 ## What is this for?
 Read Configurations from different sources

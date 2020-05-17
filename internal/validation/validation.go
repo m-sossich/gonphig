@@ -10,6 +10,7 @@ import (
 	enTranslations "gopkg.in/go-playground/validator.v9/translations/en"
 )
 
+// Validator defines a way to validate the Configuration struct
 type Validator interface {
 	ValidateStruct(s interface{}) error
 }
@@ -19,16 +20,8 @@ type validatorImpl struct {
 	translations ut.Translator
 }
 
-const (
-	requiredErrorMessage = "{0} field is required."
-)
-
-func DefaultValidator() (Validator, error) {
-	m := map[string]string{}
-	m["required"] = requiredErrorMessage
-	return WithMessages(m)
-}
-
+// WithMessages Returns a validator that will use the  custom messages for a given validation error
+// [<validation error>]<custom message>
 func WithMessages(translations map[string]string) (Validator, error) {
 	v := validator.New()
 	t, err := setupMessages(v, translations)
