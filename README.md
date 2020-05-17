@@ -2,7 +2,7 @@
 ![Go](https://github.com/m-sossich/gonphig/workflows/Go/badge.svg?branch=master) 
 [![Go Report Card](https://goreportcard.com/badge/github.com/m-sossich/gonphig)](https://goreportcard.com/report/github.com/m-sossich/gonphig)
 [![](https://godoc.org/github.com/tendermint/iavl?status.svg)](https://pkg.go.dev/github.com/m-sossich/gonphig/pkg/gonphig)
-
+[![codecov](https://codecov.io/gh/m-sossich/gonphig/branch/master/graph/badge.svg)](https://codecov.io/gh/m-sossich/gonphig)
 
 ## What is this for?
 Read Configurations from different sources
