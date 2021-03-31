@@ -19,7 +19,7 @@ type Conf struct {
 }
 
 ...
-var conf ProfileConfig
+var conf Conf
 if err := gonphig.ReadConfig(&conf); err != nil {
 	log.Fatal(err)
 ```
@@ -36,7 +36,7 @@ type Conf struct {
 }
 
 ...
-var conf ProfileConfig
+var conf Conf
 if err := gonphig.ReadConfig(&conf); err != nil {
 	log.Fatal(err)
 }
@@ -62,7 +62,7 @@ type Conf struct {
     Field string 
 }
 ...
-var conf ProfileConfig
+var conf Conf
 if err := gonphig.ReadFromFile("path/to/file.yml", &conf); err != nil {
 	log.Fatal(err)
 }
