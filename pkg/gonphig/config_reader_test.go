@@ -368,6 +368,29 @@ func TestNilFlagSetReturnsError(t *testing.T) {
 	assert.Equal(t, "flag set must not be nil", err.Error())
 }
 
+func TestNilConfigReturnsError(t *testing.T) {
+	err := ReadConfig(newFlagSet(t.Name()), nil)
+	require.Error(t, err)
+	assert.Equal(t, "configuration must not be nil", err.Error())
+}
+
+func TestReadFromFileNilFlagSetReturnsErrorBeforeIO(t *testing.T) {
+	err := ReadFromFile("nonexistent.yml", nil, &parentConfig{})
+	require.Error(t, err)
+	assert.Equal(t, "flag set must not be nil", err.Error())
+}
+
+func TestUnknownValidateRuleReturnsError(t *testing.T) {
+	type testType struct {
+		Field string `validate:"requried"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown validation rule")
+}
+
 func TestNonPointerStructReturnsError(t *testing.T) {
 	type testType struct {
 		Field string

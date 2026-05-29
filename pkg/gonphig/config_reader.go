@@ -18,12 +18,12 @@
 //
 // # Struct tags
 //
-//   - flag:"name"       bind to a CLI flag
-//   - flag-usage:"txt"  usage string shown in --help (optional, use with flag)
-//   - env:"VAR"         bind to an environment variable
-//   - default:"val"     fallback when no flag or env var is set
+//   - flag:"name"         bind to a CLI flag
+//   - flag-usage:"txt"    usage string shown in --help (optional, use with flag)
+//   - env:"VAR"           bind to an environment variable
+//   - default:"val"       fallback when no flag or env var is set
 //   - validate:"required" return an error if the field is the zero value after loading
-//   - yaml:"name"       rename the field in a YAML source file
+//   - yaml:"name"         rename the field in a YAML source file
 //
 // Tags may be combined freely. When a field has both flag and default tags, the
 // default value is used as the flag's default so --help shows meaningful output.
@@ -59,9 +59,12 @@ const (
 // The caller must call fs.Parse after ReadFromFile returns so that registered
 // flags are populated from the command line.
 //
-// c must be a non-nil pointer to a struct. Passing a non-pointer or a pointer
-// to a non-struct type returns an error.
+// fs must not be nil. c must be a non-nil pointer to a struct. Passing a
+// non-pointer or a pointer to a non-struct type returns an error.
 func ReadFromFile(configPath string, fs *flag.FlagSet, c any) error {
+	if fs == nil {
+		return errors.New("flag set must not be nil")
+	}
 	configFile, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -84,8 +87,8 @@ func ReadFromFile(configPath string, fs *flag.FlagSet, c any) error {
 // or libraries.
 //
 // fs must not be nil. c must be a non-nil pointer to a struct. Passing a
-// non-pointer or a pointer to a non-struct type returns an error. Unsupported
-// field types (e.g. chan, func) return an error at load time.
+// non-pointer, nil, or a pointer to a non-struct type returns an error.
+// Unsupported field types (e.g. chan, func) return an error at load time.
 //
 // If any field is tagged validate:"required" and its value remains the zero
 // value after all sources are applied, ReadConfig returns an error.
@@ -93,17 +96,21 @@ func ReadConfig(fs *flag.FlagSet, c any) error {
 	if fs == nil {
 		return errors.New("flag set must not be nil")
 	}
+	if c == nil {
+		return errors.New("configuration must not be nil")
+	}
 
 	t := reflect.TypeOf(c)
 
 	switch t.Kind() {
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Ptr:
 		val := t.Elem()
 		if val.Kind() != reflect.Struct {
 			return errors.New("invalid configuration structure")
 		}
+		rv := reflect.ValueOf(c).Elem()
 		for i := 0; i < val.NumField(); i++ {
-			value := reflect.ValueOf(c).Elem().Field(i)
+			value := rv.Field(i)
 			if err := overwriteFields(fs, val.Field(i), &value); err != nil {
 				return err
 			}
@@ -125,7 +132,7 @@ var durationType = reflect.TypeOf(time.Duration(0))
 // named type before the kind switch to avoid being treated as a raw int64.
 func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) error {
 	if f.Type == durationType {
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setDuration(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setDuration(fs, v, t) })
 	}
 
 	switch f.Type.Kind() {
@@ -137,22 +144,22 @@ func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) 
 			}
 		}
 	case reflect.Int64:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt64(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt64(fs, v, t) })
 	case reflect.Int:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt(fs, v, t) })
 	case reflect.Float32:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat32(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat32(fs, v, t) })
 	case reflect.Float64:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat64(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat64(fs, v, t) })
 	case reflect.String:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setString(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setString(fs, v, t) })
 	case reflect.Bool:
-		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setBool(fs, v, t) })
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setBool(fs, v, t) })
 	case reflect.Slice:
 		if f.Type.Elem().Kind() != reflect.String {
 			return nil
 		}
-		return overwriteValue(f, v, setStringSlice)
+		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setStringSlice(fs, v, t) })
 	case reflect.Map:
 		return nil
 	default:
@@ -161,11 +168,11 @@ func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) 
 	return nil
 }
 
-// overwriteValue calls setValue only when the field has at least one struct tag
-// defined, skipping untagged fields entirely.
-func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(*reflect.Value, reflect.StructTag) error) error {
-	if len(f.Tag) > 0 {
-		return setValue(v, f.Tag)
+// overwriteValue calls setValue only when the field has at least one struct
+// tag defined, skipping untagged fields entirely.
+func overwriteValue(tag reflect.StructTag, v *reflect.Value, setValue func(*reflect.Value, reflect.StructTag) error) error {
+	if len(tag) > 0 {
+		return setValue(v, tag)
 	}
 	return nil
 }
@@ -270,8 +277,10 @@ func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 }
 
 // float32Flag implements flag.Value for float32 fields. The flag package has
-// no Float32Var, so we use a custom flag.Value to avoid the unsafe pointer
-// cast that would result from reinterpreting a *float32 as *float64.
+// no Float32Var, so a custom flag.Value is used instead. Unlike fs.XxxVar
+// which writes the default directly, fs.Var only reads String() for display —
+// so setFloat32 writes the default to the field before registering the flag,
+// then String() reflects that value back for --help output.
 type float32Flag struct{ v *reflect.Value }
 
 func (f float32Flag) String() string {
@@ -279,35 +288,30 @@ func (f float32Flag) String() string {
 }
 
 func (f float32Flag) Set(s string) error {
-	parsed, err := strconv.ParseFloat(strings.TrimSpace(s), 32)
-	if err != nil {
-		return err
-	}
-	f.v.SetFloat(parsed)
-	return nil
+	return parseFloat(f.v, s, 32)
 }
 
 // setFloat32 applies the flag, env, or default tag to a float32 field.
-// Flags use a custom flag.Value implementation because the flag package has no
-// native Float32Var. When a flag tag is present the default tag value (if any)
-// is used as the flag's default so that --help displays a meaningful value.
+// When a flag tag is present, the default (if any) is written to the field
+// before registering the flag so String() returns the correct default for
+// --help. This differs from other setters only because the flag package has
+// no native Float32Var — the observable behaviour is identical.
 func setFloat32(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
 		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(d), 32); err == nil {
-				v.SetFloat(parsed)
-			}
+			// Write default before fs.Var so String() reflects it in --help.
+			_ = parseFloat(v, d, 32)
 		}
 		fs.Var(float32Flag{v}, val, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseFloat32(v, value)
+			return parseFloat(v, value, 32)
 		}
 	}
 	if def, ok := t.Lookup(defaultKey); ok {
-		return parseFloat32(v, def)
+		return parseFloat(v, def, 32)
 	}
 	return nil
 }
@@ -328,11 +332,11 @@ func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseFloat64(v, value)
+			return parseFloat(v, value, 64)
 		}
 	}
 	if def, ok := t.Lookup(defaultKey); ok {
-		return parseFloat64(v, def)
+		return parseFloat(v, def, 64)
 	}
 	return nil
 }
@@ -367,7 +371,7 @@ func setDuration(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error 
 // Values are parsed as a comma-separated list; whitespace around each entry
 // is trimmed. The flag tag is not supported for slice fields and returns an
 // error if present.
-func setStringSlice(v *reflect.Value, t reflect.StructTag) error {
+func setStringSlice(_ *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if _, ok := t.Lookup(readFlagKey); ok {
 		return fmt.Errorf("flag tag is not supported for slice fields")
 	}
@@ -416,20 +420,11 @@ func parseInt64(v *reflect.Value, val string) error {
 	return nil
 }
 
-func parseFloat32(v *reflect.Value, val string) error {
+// parseFloat parses val into a float of the given bitSize (32 or 64) and sets
+// it on v. Used by both setFloat32 and setFloat64 to avoid duplication.
+func parseFloat(v *reflect.Value, val string, bitSize int) error {
 	if trimmed := strings.TrimSpace(val); trimmed != "" {
-		parsed, err := strconv.ParseFloat(trimmed, 32)
-		if err != nil {
-			return err
-		}
-		v.SetFloat(parsed)
-	}
-	return nil
-}
-
-func parseFloat64(v *reflect.Value, val string) error {
-	if trimmed := strings.TrimSpace(val); trimmed != "" {
-		parsed, err := strconv.ParseFloat(trimmed, 64)
+		parsed, err := strconv.ParseFloat(trimmed, bitSize)
 		if err != nil {
 			return err
 		}
