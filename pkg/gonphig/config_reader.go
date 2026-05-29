@@ -261,28 +261,6 @@ func parseInt64(v *reflect.Value, val string) error {
 	return nil
 }
 
-func parseBool(v *reflect.Value, val string) error {
-	if trimmed := strings.TrimSpace(val); trimmed != "" {
-		parsed, err := strconv.ParseBool(trimmed)
-		if err != nil {
-			return err
-		}
-		v.SetBool(parsed)
-	}
-	return nil
-}
-
-func parseInt64(v *reflect.Value, val string) error {
-	if trimmed := strings.TrimSpace(val); trimmed != "" {
-		parsed, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.SetInt(parsed)
-	}
-	return nil
-}
-
 func parseFloat64(v *reflect.Value, val string) error {
 	if trimmed := strings.TrimSpace(val); trimmed != "" {
 		parsed, err := strconv.ParseFloat(trimmed, 64)
