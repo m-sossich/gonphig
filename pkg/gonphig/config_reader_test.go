@@ -328,3 +328,97 @@ func TestStringSliceFlagTagReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag tag is not supported for slice fields")
 }
+
+func TestNonPointerStructReturnsError(t *testing.T) {
+	type testType struct {
+		Field string
+	}
+
+	err := ReadConfig(newFlagSet(t.Name()), testType{})
+	require.Error(t, err)
+	assert.Equal(t, "configuration to load needs to be a pointer", err.Error())
+}
+
+func TestInvalidTypeReturnsError(t *testing.T) {
+	s := "not a struct"
+	err := ReadConfig(newFlagSet(t.Name()), &s)
+	require.Error(t, err)
+	assert.Equal(t, "invalid configuration structure", err.Error())
+}
+
+func TestRequiredIntFailsOnZero(t *testing.T) {
+	type testType struct {
+		Port int `validate:"required"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Equal(t, "missing required configuration: Port", err.Error())
+}
+
+func TestRequiredBoolFailsOnFalse(t *testing.T) {
+	type testType struct {
+		Enabled bool `validate:"required"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Equal(t, "missing required configuration: Enabled", err.Error())
+}
+
+func TestRequiredDurationFailsOnZero(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `validate:"required"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Equal(t, "missing required configuration: Timeout", err.Error())
+}
+
+func TestRequiredOnNestedField(t *testing.T) {
+	type testType struct {
+		DB struct {
+			Host string `validate:"required"`
+		}
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Equal(t, "missing required configuration: Host", err.Error())
+}
+
+func TestReadFromFileMissingFileReturnsError(t *testing.T) {
+	var config parentConfig
+	err := ReadFromFile("nonexistent.yml", newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+}
+
+func TestUnsupportedFieldTypeReturnsError(t *testing.T) {
+	type testType struct {
+		Ch chan int
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid field")
+}
+
+func TestFlagDefaultFallback(t *testing.T) {
+	type testType struct {
+		Field string `flag:"field-with-default" default:"fallback"`
+	}
+
+	fs := newFlagSet(t.Name())
+	var config testType
+	err := ReadConfig(fs, &config)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{}))
+	assert.Equal(t, "fallback", config.Field)
+}
