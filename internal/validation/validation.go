@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
-	"gopkg.in/go-playground/validator.v9"
-	enTranslations "gopkg.in/go-playground/validator.v9/translations/en"
+	"github.com/go-playground/validator/v10"
+	enTranslations "github.com/go-playground/validator/v10/translations/en"
 )
 
 // Validator defines a way to validate the Configuration struct
