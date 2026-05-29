@@ -1,3 +1,6 @@
+// Package validation provides struct validation for gonphig configuration
+// structs. It is intentionally minimal: the only supported rule is "required",
+// which checks that a field is not the zero value for its type.
 package validation
 
 import (
@@ -6,12 +9,20 @@ import (
 	"strings"
 )
 
-// ValidateRequired walks the struct and returns an error for any field tagged
-// validate:"required" whose value is the zero value for its type.
+// ValidateRequired inspects c for fields tagged validate:"required" and
+// returns an error for the first field whose value is the zero value for its
+// type (e.g. "" for string, 0 for numeric types, false for bool).
+//
+// c must be a non-nil pointer to a struct. ValidateRequired recurses into
+// nested structs automatically.
+//
+// Error format: "missing required configuration: <FieldName>"
 func ValidateRequired(c interface{}) error {
 	return walk(reflect.TypeOf(c).Elem(), reflect.ValueOf(c).Elem())
 }
 
+// walk traverses t/v field-by-field, recursing into nested structs, and
+// checks the validate tag on each non-struct field.
 func walk(t reflect.Type, v reflect.Value) error {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
