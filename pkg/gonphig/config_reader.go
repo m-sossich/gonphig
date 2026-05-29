@@ -40,11 +40,6 @@ func ReadFromFile(configPath string, fs *flag.FlagSet, c interface{}) error {
 func ReadConfig(fs *flag.FlagSet, c interface{}) error {
 	t := reflect.TypeOf(c)
 
-	v, err := validation.WithMessages(map[string]string{"required": "missing required configuration: {0}"})
-	if err != nil {
-		return err
-	}
-
 	switch t.Kind() {
 	case reflect.Ptr, reflect.Interface:
 		val := t.Elem()
@@ -54,7 +49,7 @@ func ReadConfig(fs *flag.FlagSet, c interface{}) error {
 				return err
 			}
 		}
-		return v.ValidateStruct(c)
+		return validation.ValidateRequired(c)
 	case reflect.Struct:
 		return errors.New("configuration to load needs to be a pointer")
 	default:

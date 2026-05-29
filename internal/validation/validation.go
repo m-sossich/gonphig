@@ -1,77 +1,39 @@
 package validation
 
 import (
-	"errors"
+	"fmt"
+	"reflect"
 	"strings"
-
-	"github.com/go-playground/locales/en"
-	ut "github.com/go-playground/universal-translator"
-	"github.com/go-playground/validator/v10"
-	enTranslations "github.com/go-playground/validator/v10/translations/en"
 )
 
-// Validator defines a way to validate the Configuration struct
-type Validator interface {
-	ValidateStruct(s interface{}) error
+// ValidateRequired walks the struct and returns an error for any field tagged
+// validate:"required" whose value is the zero value for its type.
+func ValidateRequired(c interface{}) error {
+	return walk(reflect.TypeOf(c).Elem(), reflect.ValueOf(c).Elem())
 }
 
-type validatorImpl struct {
-	validator    *validator.Validate
-	translations ut.Translator
-}
+func walk(t reflect.Type, v reflect.Value) error {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i)
 
-// WithMessages Returns a validator that will use the  custom messages for a given validation error
-// [<validation error>]<custom message>
-func WithMessages(translations map[string]string) (Validator, error) {
-	v := validator.New()
-	t, err := setupMessages(v, translations)
-	if err != nil {
-		return nil, err
-	}
-	return &validatorImpl{v, t}, nil
-}
+		if field.Type.Kind() == reflect.Struct {
+			if err := walk(field.Type, value); err != nil {
+				return err
+			}
+			continue
+		}
 
-func (v *validatorImpl) ValidateStruct(s interface{}) error {
-	err := v.validator.Struct(s)
-	if err != nil {
-		validationErrors := err.(validator.ValidationErrors)
-		if validationErrors != nil {
-			return translateErrors(validationErrors, v.translations)
+		tag, ok := field.Tag.Lookup("validate")
+		if !ok {
+			continue
+		}
+
+		for _, rule := range strings.Split(tag, ",") {
+			if strings.TrimSpace(rule) == "required" && value.IsZero() {
+				return fmt.Errorf("missing required configuration: %s", field.Name)
+			}
 		}
 	}
 	return nil
-}
-
-func setupMessages(v *validator.Validate, translations map[string]string) (ut.Translator, error) {
-	eng := en.New()
-	uni := ut.New(eng, eng)
-	trans, _ := uni.GetTranslator("en")
-
-	for tag, msg := range translations {
-		if err := addTranslation(tag, msg, trans, v); err != nil {
-			return nil, err
-		}
-	}
-
-	enTranslations.RegisterDefaultTranslations(v, trans)
-
-	return trans, nil
-}
-
-func addTranslation(tag string, messageTemplate string, trans ut.Translator, v *validator.Validate) error {
-	return v.RegisterTranslation(tag, trans, func(ut ut.Translator) error {
-		return ut.Add(tag, messageTemplate, true)
-	}, func(ut ut.Translator, fe validator.FieldError) string {
-		t, _ := ut.T(tag, fe.Field(), fe.Param())
-		return t
-	})
-}
-
-func translateErrors(errs []validator.FieldError, t ut.Translator) error {
-	translations := []string{}
-	for _, e := range errs {
-		translations = append(translations, e.Translate(t))
-	}
-	err := errors.New(strings.Join(translations, ", "))
-	return err
 }
