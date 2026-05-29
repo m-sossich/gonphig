@@ -5,8 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/m-sossich/gonphig/internal/validation"
-	"gopkg.in/yaml.v2"
-	"io/ioutil"
+	"gopkg.in/yaml.v3"
 	"os"
 	"reflect"
 	"strconv"
@@ -27,7 +26,7 @@ const (
 // ReadFromFile loads configurations into the config struct provided.
 // Default values from the given yaml file. If indicated, the values might be overwritten by a env-var or flag
 func ReadFromFile(configPath string, c interface{}) error {
-	configFile, err := ioutil.ReadFile(configPath)
+	configFile, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
 	}
