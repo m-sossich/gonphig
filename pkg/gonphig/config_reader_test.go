@@ -1,6 +1,7 @@
 package gonphig
 
 import (
+	"flag"
 	"os"
 	"os/exec"
 	"testing"
@@ -32,9 +33,13 @@ type withFlagsConfig struct {
 	}
 }
 
+func newFlagSet(name string) *flag.FlagSet {
+	return flag.NewFlagSet(name, flag.ContinueOnError)
+}
+
 func TestReadConfigFromFile(t *testing.T) {
 	var config parentConfig
-	err := ReadFromFile(configTestFile, &config)
+	err := ReadFromFile(configTestFile, newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Hello", config.Field)
@@ -43,12 +48,12 @@ func TestReadConfigFromFile(t *testing.T) {
 }
 
 func TestReadConfigFromEnvs(t *testing.T) {
-	os.Setenv("string-env", "Bye!")
-	os.Setenv("int-env", "100")
-	os.Setenv("bool-env", "false")
+	t.Setenv("string-env", "Bye!")
+	t.Setenv("int-env", "100")
+	t.Setenv("bool-env", "false")
 
 	var config parentConfig
-	err := ReadFromFile(configTestFile, &config)
+	err := ReadFromFile(configTestFile, newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bye!", config.Field)
@@ -57,13 +62,13 @@ func TestReadConfigFromEnvs(t *testing.T) {
 }
 
 func TestReadConfigFromFlags(t *testing.T) {
-	os.Args = append(os.Args, "--string-flag=DUDE")
-	os.Args = append(os.Args, "--int-flag=10000")
-	os.Args = append(os.Args, "--bool-flag=true")
+	fs := newFlagSet(t.Name())
 
 	var config withFlagsConfig
-	err := ReadFromFile(configTestFile, &config)
+	err := ReadFromFile(configTestFile, fs, &config)
 	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{"--string-flag=DUDE", "--int-flag=10000", "--bool-flag=true"}))
 
 	assert.Equal(t, "DUDE", config.Field)
 	assert.Equal(t, 10000, config.Child.Int)
@@ -72,9 +77,12 @@ func TestReadConfigFromFlags(t *testing.T) {
 
 func TestWrongFlagTypeMessage(t *testing.T) {
 	if os.Getenv("WRONG-FLAG-VALUE") == "1" {
-		os.Args = append(os.Args, "--int-flag=notAnInt")
+		fs := newFlagSet(t.Name())
 		var config withFlagsConfig
-		_ = ReadFromFile(configTestFile, &config)
+		_ = ReadFromFile(configTestFile, fs, &config)
+		if err := fs.Parse([]string{"--int-flag=notAnInt"}); err != nil {
+			os.Exit(1)
+		}
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=TestWrongFlagTypeMessage")
@@ -83,16 +91,16 @@ func TestWrongFlagTypeMessage(t *testing.T) {
 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
 		return
 	}
-	t.Fatal("gonphig loading should have failed due to  the wrong flag argument was used")
+	t.Fatal("gonphig loading should have failed due to the wrong flag argument was used")
 }
 
 func TestReadConfig(t *testing.T) {
-	os.Setenv("string-env", "Bye!")
-	os.Setenv("int-env", "100")
-	os.Setenv("bool-env", "false")
+	t.Setenv("string-env", "Bye!")
+	t.Setenv("int-env", "100")
+	t.Setenv("bool-env", "false")
 
 	var config parentConfig
-	err := ReadConfig(&config)
+	err := ReadConfig(newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bye!", config.Field)
@@ -106,14 +114,14 @@ func TestRequiredFields(t *testing.T) {
 	}
 
 	var config testRequired
-	err := ReadConfig(&config)
+	err := ReadConfig(newFlagSet(t.Name()), &config)
 	require.Error(t, err)
 	assert.Equal(t, "missing required configuration: Field", err.Error())
 
-	os.Setenv("string-req-env", "Bye!")
+	t.Setenv("string-req-env", "Bye!")
 	var ok testRequired
-	err = ReadConfig(&ok)
-
+	err = ReadConfig(newFlagSet(t.Name()), &ok)
+	require.NoError(t, err)
 	assert.Equal(t, "Bye!", ok.Field)
 
 	type testNotRequired struct {
@@ -121,7 +129,7 @@ func TestRequiredFields(t *testing.T) {
 	}
 
 	var notRequired testNotRequired
-	err = ReadConfig(&notRequired)
+	err = ReadConfig(newFlagSet(t.Name()), &notRequired)
 	require.NoError(t, err)
 	assert.Equal(t, "", notRequired.Field)
 }
@@ -131,11 +139,11 @@ func TestIntFamily(t *testing.T) {
 		Int   int   `env:"int-env"`
 		Int64 int64 `env:"int64-env"`
 	}
-	os.Setenv("int-env", "100")
-	os.Setenv("int64-env", "10000")
+	t.Setenv("int-env", "100")
+	t.Setenv("int64-env", "10000")
 
 	var config testType
-	err := ReadConfig(&config)
+	err := ReadConfig(newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 	assert.Equal(t, 100, config.Int)
 	assert.Equal(t, int64(10000), config.Int64)
@@ -146,11 +154,11 @@ func TestFloatFamily(t *testing.T) {
 		Float32 float32 `env:"float32-env"`
 		Float64 float64 `env:"float64-env"`
 	}
-	os.Setenv("float32-env", "100.01")
-	os.Setenv("float64-env", "10000.01")
+	t.Setenv("float32-env", "100.01")
+	t.Setenv("float64-env", "10000.01")
 
 	var config testType
-	err := ReadConfig(&config)
+	err := ReadConfig(newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 	assert.Equal(t, float32(100.01), config.Float32)
 	assert.Equal(t, 10000.01, config.Float64)
@@ -166,8 +174,7 @@ func TestDefaultValues(t *testing.T) {
 		Bool    bool    `env:"bool-env-def" default:"true"`
 	}
 	var config testType
-	err := ReadConfig(&config)
-
+	err := ReadConfig(newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, float32(100.01), config.Float32)
@@ -177,10 +184,9 @@ func TestDefaultValues(t *testing.T) {
 	assert.Equal(t, "something", config.String)
 	assert.True(t, config.Bool)
 
-	//Env variables overwrite default value
-	os.Setenv("int-env-def", "1")
+	t.Setenv("int-env-def", "1")
 	var config2 testType
-	err = ReadConfig(&config2)
+	err = ReadConfig(newFlagSet(t.Name()), &config2)
 	require.NoError(t, err)
 
 	assert.Equal(t, float32(100.01), config2.Float32)
@@ -198,12 +204,14 @@ func TestReadValueOrder(t *testing.T) {
 		IntC int `env:"intb-env" flag:"intc-flag" default:"1"`
 	}
 
-	os.Setenv("intb-env", "2")
-	os.Args = append(os.Args, "--intc-flag=3")
+	t.Setenv("intb-env", "2")
 
+	fs := newFlagSet(t.Name())
 	var config testType
-	err := ReadConfig(&config)
+	err := ReadConfig(fs, &config)
 	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{"--intc-flag=3"}))
 
 	assert.Equal(t, 1, config.IntA)
 	assert.Equal(t, 2, config.IntB)
@@ -216,7 +224,7 @@ func TestReadArraysFromConfigFromFile(t *testing.T) {
 	}
 
 	var config testType
-	err := ReadFromFile(configArraysTestFile, &config)
+	err := ReadFromFile(configArraysTestFile, newFlagSet(t.Name()), &config)
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, len(config.Something))
