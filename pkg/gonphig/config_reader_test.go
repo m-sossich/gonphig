@@ -329,6 +329,34 @@ func TestStringSliceFlagTagReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "flag tag is not supported for slice fields")
 }
 
+func TestFloat32FromFlag(t *testing.T) {
+	type testType struct {
+		Value float32 `flag:"float32-val" default:"1.5"`
+	}
+
+	fs := newFlagSet(t.Name())
+	var config testType
+	err := ReadConfig(fs, &config)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{"--float32-val=3.14"}))
+	assert.InDelta(t, float32(3.14), config.Value, 0.001)
+}
+
+func TestFloat32DefaultFallback(t *testing.T) {
+	type testType struct {
+		Value float32 `flag:"float32-fallback" default:"2.5"`
+	}
+
+	fs := newFlagSet(t.Name())
+	var config testType
+	err := ReadConfig(fs, &config)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{}))
+	assert.InDelta(t, float32(2.5), config.Value, 0.001)
+}
+
 func TestNonPointerStructReturnsError(t *testing.T) {
 	type testType struct {
 		Field string

@@ -136,7 +136,9 @@ func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) 
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt64(fs, v, t) })
 	case reflect.Int:
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt(fs, v, t) })
-	case reflect.Float32, reflect.Float64:
+	case reflect.Float32:
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat32(fs, v, t) })
+	case reflect.Float64:
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat64(fs, v, t) })
 	case reflect.String:
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setString(fs, v, t) })
@@ -263,8 +265,51 @@ func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-// setFloat64 applies the flag, env, or default tag to a float32 or float64
-// field. When a flag tag is present the default tag value (if any) is used as
+// float32Flag implements flag.Value for float32 fields. The flag package has
+// no Float32Var, so we use a custom flag.Value to avoid the unsafe pointer
+// cast that would result from reinterpreting a *float32 as *float64.
+type float32Flag struct{ v *reflect.Value }
+
+func (f float32Flag) String() string {
+	return strconv.FormatFloat(f.v.Float(), 'g', -1, 32)
+}
+
+func (f float32Flag) Set(s string) error {
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(s), 32)
+	if err != nil {
+		return err
+	}
+	f.v.SetFloat(parsed)
+	return nil
+}
+
+// setFloat32 applies the flag, env, or default tag to a float32 field.
+// Flags use a custom flag.Value implementation because the flag package has no
+// native Float32Var. When a flag tag is present the default tag value (if any)
+// is used as the flag's default so that --help displays a meaningful value.
+func setFloat32(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
+	if val, ok := t.Lookup(readFlagKey); ok {
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(d), 32); err == nil {
+				v.SetFloat(parsed)
+			}
+		}
+		fs.Var(float32Flag{v}, val, getUsage(t))
+		return nil
+	}
+	if val, ok := t.Lookup(readEnvKey); ok {
+		if value := os.Getenv(val); value != "" {
+			return parseFloat32(v, value)
+		}
+	}
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseFloat32(v, def)
+	}
+	return nil
+}
+
+// setFloat64 applies the flag, env, or default tag to a float64 field.
+// When a flag tag is present the default tag value (if any) is used as
 // the flag's default so that --help displays a meaningful value.
 func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
@@ -363,6 +408,17 @@ func parseInt64(v *reflect.Value, val string) error {
 			return err
 		}
 		v.SetInt(parsed)
+	}
+	return nil
+}
+
+func parseFloat32(v *reflect.Value, val string) error {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
+		parsed, err := strconv.ParseFloat(trimmed, 32)
+		if err != nil {
+			return err
+		}
+		v.SetFloat(parsed)
 	}
 	return nil
 }
