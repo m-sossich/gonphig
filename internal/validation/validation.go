@@ -17,7 +17,7 @@ import (
 // nested structs automatically.
 //
 // Error format: "missing required configuration: <FieldName>"
-func ValidateRequired(c interface{}) error {
+func ValidateRequired(c any) error {
 	return walk(reflect.TypeOf(c).Elem(), reflect.ValueOf(c).Elem())
 }
 

@@ -61,7 +61,7 @@ const (
 //
 // c must be a non-nil pointer to a struct. Passing a non-pointer or a pointer
 // to a non-struct type returns an error.
-func ReadFromFile(configPath string, fs *flag.FlagSet, c interface{}) error {
+func ReadFromFile(configPath string, fs *flag.FlagSet, c any) error {
 	configFile, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -83,13 +83,17 @@ func ReadFromFile(configPath string, fs *flag.FlagSet, c interface{}) error {
 // standard global flag set, or a custom *flag.FlagSet for isolation in tests
 // or libraries.
 //
-// c must be a non-nil pointer to a struct. Passing a non-pointer or a pointer
-// to a non-struct type returns an error. Unsupported field types (e.g. chan,
-// func) return an error at load time.
+// fs must not be nil. c must be a non-nil pointer to a struct. Passing a
+// non-pointer or a pointer to a non-struct type returns an error. Unsupported
+// field types (e.g. chan, func) return an error at load time.
 //
 // If any field is tagged validate:"required" and its value remains the zero
 // value after all sources are applied, ReadConfig returns an error.
-func ReadConfig(fs *flag.FlagSet, c interface{}) error {
+func ReadConfig(fs *flag.FlagSet, c any) error {
+	if fs == nil {
+		return errors.New("flag set must not be nil")
+	}
+
 	t := reflect.TypeOf(c)
 
 	switch t.Kind() {

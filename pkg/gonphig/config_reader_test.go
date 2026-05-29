@@ -357,6 +357,17 @@ func TestFloat32DefaultFallback(t *testing.T) {
 	assert.InDelta(t, float32(2.5), config.Value, 0.001)
 }
 
+func TestNilFlagSetReturnsError(t *testing.T) {
+	type testType struct {
+		Field string `env:"FIELD"`
+	}
+
+	var config testType
+	err := ReadConfig(nil, &config)
+	require.Error(t, err)
+	assert.Equal(t, "flag set must not be nil", err.Error())
+}
+
 func TestNonPointerStructReturnsError(t *testing.T) {
 	type testType struct {
 		Field string
