@@ -43,6 +43,9 @@ func ReadConfig(fs *flag.FlagSet, c interface{}) error {
 	switch t.Kind() {
 	case reflect.Ptr, reflect.Interface:
 		val := t.Elem()
+		if val.Kind() != reflect.Struct {
+			return errors.New("invalid configuration structure")
+		}
 		for i := 0; i < val.NumField(); i++ {
 			value := reflect.ValueOf(c).Elem().Field(i)
 			if err := overwriteFields(fs, val.Field(i), &value); err != nil {
@@ -103,7 +106,11 @@ func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(*refl
 
 func setString(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
+		def := v.String()
+		if d, ok := t.Lookup(defaultKey); ok && d != "" {
+			def = strings.TrimSpace(d)
+		}
+		fs.StringVar(v.Addr().Interface().(*string), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
@@ -120,7 +127,13 @@ func setString(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 
 func setBool(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
+		def := v.Bool()
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(d)); err == nil {
+				def = parsed
+			}
+		}
+		fs.BoolVar(v.Addr().Interface().(*bool), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
@@ -136,7 +149,13 @@ func setBool(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 
 func setInt64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
+		def := v.Int()
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := strconv.ParseInt(strings.TrimSpace(d), 10, 64); err == nil {
+				def = parsed
+			}
+		}
+		fs.Int64Var(v.Addr().Interface().(*int64), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
@@ -152,7 +171,13 @@ func setInt64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 
 func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
+		def := int(v.Int())
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := strconv.ParseInt(strings.TrimSpace(d), 10, 64); err == nil {
+				def = int(parsed)
+			}
+		}
+		fs.IntVar(v.Addr().Interface().(*int), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
@@ -168,7 +193,13 @@ func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 
 func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
+		def := v.Float()
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(d), 64); err == nil {
+				def = parsed
+			}
+		}
+		fs.Float64Var(v.Addr().Interface().(*float64), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
@@ -184,7 +215,13 @@ func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 
 func setDuration(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		fs.DurationVar(v.Addr().Interface().(*time.Duration), val, time.Duration(v.Int()), getUsage(t))
+		def := time.Duration(v.Int())
+		if d, ok := t.Lookup(defaultKey); ok {
+			if parsed, err := time.ParseDuration(strings.TrimSpace(d)); err == nil {
+				def = parsed
+			}
+		}
+		fs.DurationVar(v.Addr().Interface().(*time.Duration), val, def, getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
