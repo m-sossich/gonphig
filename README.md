@@ -5,97 +5,130 @@
 [![codecov](https://codecov.io/gh/m-sossich/gonphig/branch/master/graph/badge.svg)](https://codecov.io/gh/m-sossich/gonphig)
 
 ## What is this for?
-Read Configurations from different sources
+Read configurations from multiple sources into a typed struct using struct tags.
 
 ## How to use it
 
 ### Read configuration from flags
 
-To load flags into your configuration struct, just indicate the name of the flag with the `flag` tag, `flag-usage` is optional
+Use the `flag` tag to bind a field to a CLI flag. You are responsible for creating the `FlagSet` and calling `Parse` — gonphig only registers the flags.
 
-```
+```go
 type Conf struct {
-    Field string    `flag:"flag-for-field" flag-usage:"not important"`
+    Field string `flag:"flag-for-field" flag-usage:"description"`
 }
 
-...
+fs := flag.NewFlagSet("myapp", flag.ExitOnError)
+
 var conf Conf
-if err := gonphig.ReadConfig(&conf); err != nil {
-	log.Fatal(err)
+if err := gonphig.ReadConfig(fs, &conf); err != nil {
+    log.Fatal(err)
+}
+
+// Parse after ReadConfig — flags are registered by this point
+if err := fs.Parse(os.Args[1:]); err != nil {
+    log.Fatal(err)
+}
 ```
 
-Gonphig will take care of the flag declaration and the `flag.Parse()` for you when it reads the configuration
+For the standard case you can pass `flag.CommandLine` directly:
+
+```go
+if err := gonphig.ReadConfig(flag.CommandLine, &conf); err != nil {
+    log.Fatal(err)
+}
+flag.Parse()
+```
 
 ### Read configuration from ENV variables
 
-To load env-var into your configuration struct, just indicate the name of the variable with the `env` tag
+Use the `env` tag to bind a field to an environment variable.
 
-```
+```go
 type Conf struct {
-   Field string     `env:"env_variable_to_read"`
+    Field string `env:"ENV_VARIABLE"`
 }
 
-...
 var conf Conf
-if err := gonphig.ReadConfig(&conf); err != nil {
-	log.Fatal(err)
+if err := gonphig.ReadConfig(flag.CommandLine, &conf); err != nil {
+    log.Fatal(err)
 }
 ```
 
 ### Assign default values
 
-You can add a default value to your configuration using the `default` tag
+Use the `default` tag to set a fallback value when neither a flag nor an env var is present.
 
-```
+```go
 type Conf struct {
-   Field string     `default:"someValue"`
-   AnInt int        `default:"42"`
+    Field   string        `env:"FIELD" default:"someValue"`
+    Count   int           `env:"COUNT" default:"42"`
+    Timeout time.Duration `env:"TIMEOUT" default:"30s"`
 }
 ```
 
-### Read configurations from a YAML file
+### Read configuration from a YAML file
 
-The values provided on the file will be taken as the default values
+YAML values are the lowest-priority source — they are overridden by env vars and flags.
 
-```
+```go
 type Conf struct {
-    Field string 
+    Field string
 }
-...
+
 var conf Conf
-if err := gonphig.ReadFromFile("path/to/file.yml", &conf); err != nil {
-	log.Fatal(err)
+if err := gonphig.ReadFromFile("path/to/file.yml", flag.CommandLine, &conf); err != nil {
+    log.Fatal(err)
 }
+flag.Parse()
 ```
 
-If you want to rename a field in the yaml file and map it into your config struct, you can use the `yaml` tag
+Use the `yaml` tag to rename a field in the YAML file:
 
-```
+```go
 type Conf struct {
     NotTheSameName string `yaml:"field"`
 }
 ```
 
+### Supported field types
+
+| Go type         | env | flag | default |
+|-----------------|-----|------|---------|
+| `string`        | ✓   | ✓    | ✓       |
+| `int`           | ✓   | ✓    | ✓       |
+| `int64`         | ✓   | ✓    | ✓       |
+| `float32`       | ✓   | ✓    | ✓       |
+| `float64`       | ✓   | ✓    | ✓       |
+| `bool`          | ✓   | ✓    | ✓       |
+| `time.Duration` | ✓   | ✓    | ✓       |
+| `[]string`      | ✓   | —    | ✓       |
+
+`[]string` values are parsed as comma-separated: `HOST1,HOST2,HOST3`.
+
 ### Validation
 
-It is possible to add validations over the configuration values using the `validate` tag
+Use the `validate` tag to enforce constraints on configuration values.
 
-```
+```go
 type Conf struct {
-   Field string `env:"env_variable_to_read" validate:"required"`
+    Field string `env:"ENV_VARIABLE" validate:"required"`
 }
 ```
 
 ### Configuration hierarchy
-1. Configuration read from `flags` 
-2. Configuration read from `env-var`
-3. Configuration coming from the `default` tag
-4. Configuration read from the `yaml` file
+
+Sources are applied in this order — higher entries win:
+
+1. `flag` — CLI flags (after `fs.Parse` is called)
+2. `env` — environment variables
+3. `default` — tag default values
+4. YAML file (when using `ReadFromFile`)
 
 ## External resources
 ### YAML
 * [SPEC](https://yaml.org/spec/1.2/spec.html)
-* To read the YAML file we are using an external library. All information can be found [here](https://github.com/go-yaml/yaml)
+* [go-yaml](https://github.com/go-yaml/yaml)
 
 ### Validations
-* To perform validations on the configuration struct, We are using an external library. All information can be found [here](https://github.com/go-playground/validator/tree/v9)
+* [go-playground/validator](https://github.com/go-playground/validator)

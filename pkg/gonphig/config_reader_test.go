@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -228,4 +229,102 @@ func TestReadArraysFromConfigFromFile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, len(config.Something))
+}
+
+func TestStringSliceFromEnv(t *testing.T) {
+	type testType struct {
+		Hosts []string `env:"HOSTS"`
+	}
+
+	t.Setenv("HOSTS", "host1, host2, host3")
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"host1", "host2", "host3"}, config.Hosts)
+}
+
+func TestStringSliceFromDefault(t *testing.T) {
+	type testType struct {
+		Hosts []string `default:"a,b,c"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "c"}, config.Hosts)
+}
+
+func TestStringSliceEnvOverridesDefault(t *testing.T) {
+	type testType struct {
+		Hosts []string `env:"HOSTS2" default:"a,b"`
+	}
+
+	t.Setenv("HOSTS2", "x,y,z")
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"x", "y", "z"}, config.Hosts)
+}
+
+func TestDurationFromEnv(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `env:"TIMEOUT"`
+	}
+
+	t.Setenv("TIMEOUT", "5s")
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Second, config.Timeout)
+}
+
+func TestDurationFromDefault(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `default:"30s"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, config.Timeout)
+}
+
+func TestDurationFromFlag(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `flag:"timeout"`
+	}
+
+	fs := newFlagSet(t.Name())
+	var config testType
+	err := ReadConfig(fs, &config)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Parse([]string{"--timeout=10m"}))
+	assert.Equal(t, 10*time.Minute, config.Timeout)
+}
+
+func TestDurationInvalidValueReturnsError(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `env:"TIMEOUT_BAD"`
+	}
+
+	t.Setenv("TIMEOUT_BAD", "not-a-duration")
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+}
+
+func TestStringSliceFlagTagReturnsError(t *testing.T) {
+	type testType struct {
+		Hosts []string `flag:"hosts"`
+	}
+
+	var config testType
+	err := ReadConfig(newFlagSet(t.Name()), &config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag tag is not supported for slice fields")
 }

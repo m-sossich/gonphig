@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -61,7 +62,12 @@ func ReadConfig(fs *flag.FlagSet, c interface{}) error {
 	}
 }
 
+var durationType = reflect.TypeOf(time.Duration(0))
+
 func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) error {
+	if f.Type == durationType {
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setDuration(fs, v, t) })
+	}
 	switch f.Type.Kind() {
 	case reflect.Struct:
 		for i := 0; i < f.Type.NumField(); i++ {
@@ -80,8 +86,13 @@ func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) 
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setString(fs, v, t) })
 	case reflect.Bool:
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setBool(fs, v, t) })
-	case reflect.Slice, reflect.Map:
-		return overwriteValue(f, v, identity)
+	case reflect.Slice:
+		if f.Type.Elem().Kind() != reflect.String {
+			return nil
+		}
+		return overwriteValue(f, v, setStringSlice)
+	case reflect.Map:
+		return nil
 	default:
 		return fmt.Errorf("invalid field[%s] type[%s]", f.Name, f.Type.Name())
 	}
@@ -176,7 +187,55 @@ func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-func identity(v *reflect.Value, t reflect.StructTag) error {
+func setDuration(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.DurationVar(v.Addr().Interface().(*time.Duration), val, time.Duration(v.Int()), getUsage(t))
+		return nil
+	}
+	if val, ok := t.Lookup(readEnvKey); ok {
+		if raw := os.Getenv(val); raw != "" {
+			return parseDuration(v, raw)
+		}
+	}
+	if def, ok := t.Lookup(defaultKey); ok {
+		return parseDuration(v, def)
+	}
+	return nil
+}
+
+func parseDuration(v *reflect.Value, val string) error {
+	d, err := time.ParseDuration(strings.TrimSpace(val))
+	if err != nil {
+		return err
+	}
+	v.SetInt(int64(d))
+	return nil
+}
+
+func setStringSlice(v *reflect.Value, t reflect.StructTag) error {
+	if _, ok := t.Lookup(readFlagKey); ok {
+		return fmt.Errorf("flag tag is not supported for slice fields")
+	}
+	var raw string
+	if val, ok := t.Lookup(readEnvKey); ok {
+		raw = os.Getenv(val)
+	}
+	if raw == "" {
+		if def, ok := t.Lookup(defaultKey); ok {
+			raw = def
+		}
+	}
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	v.Set(reflect.ValueOf(result))
 	return nil
 }
 
