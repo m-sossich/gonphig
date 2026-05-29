@@ -68,7 +68,6 @@ func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) 
 	if f.Type == durationType {
 		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setDuration(fs, v, t) })
 	}
-
 	switch f.Type.Kind() {
 	case reflect.Struct:
 		for i := 0; i < f.Type.NumField(); i++ {
@@ -237,6 +236,28 @@ func setStringSlice(v *reflect.Value, t reflect.StructTag) error {
 		}
 	}
 	v.Set(reflect.ValueOf(result))
+	return nil
+}
+
+func parseBool(v *reflect.Value, val string) error {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
+		parsed, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return err
+		}
+		v.SetBool(parsed)
+	}
+	return nil
+}
+
+func parseInt64(v *reflect.Value, val string) error {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return err
+		}
+		v.SetInt(parsed)
+	}
 	return nil
 }
 
