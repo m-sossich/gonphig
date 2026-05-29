@@ -13,33 +13,30 @@ import (
 )
 
 const (
-	// Use the 'env' tag to mark than an attribute might be overwritten if such env-var is set
-	readEnvKey = "env"
-	// Use the 'flag' tag to mark than an attribute might be overwritten if such flag is set
+	readEnvKey  = "env"
 	readFlagKey = "flag"
-	// Use the 'default' tag set a default value for an attribute
-	defaultKey = "default"
-	// Use the 'flag-usage' to add a description for the expected flag. This is optional
-	flagUsage = "flag-usage"
+	defaultKey  = "default"
+	flagUsage   = "flag-usage"
 )
 
 // ReadFromFile loads configurations into the config struct provided.
-// Default values from the given yaml file. If indicated, the values might be overwritten by a env-var or flag
-func ReadFromFile(configPath string, c interface{}) error {
+// YAML file values are the lowest priority — env vars and flags override them.
+// The caller is responsible for calling fs.Parse after this returns.
+func ReadFromFile(configPath string, fs *flag.FlagSet, c interface{}) error {
 	configFile, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
 	}
-	err = yaml.Unmarshal(configFile, c)
-	if err != nil {
+	if err = yaml.Unmarshal(configFile, c); err != nil {
 		return err
 	}
-	return ReadConfig(c)
+	return ReadConfig(fs, c)
 }
 
-// ReadConfig loads configurations into the config struct provided. Default should be provided using the 'default' tag.
-// If indicated, the values might be overwritten by a env-var or flag
-func ReadConfig(c interface{}) error {
+// ReadConfig loads configurations into the config struct provided.
+// Pass flag.CommandLine for the standard case, or a custom *flag.FlagSet for isolation (tests, libraries).
+// The caller is responsible for calling fs.Parse after this returns so registered flags are populated.
+func ReadConfig(fs *flag.FlagSet, c interface{}) error {
 	t := reflect.TypeOf(c)
 
 	v, err := validation.WithMessages(map[string]string{"required": "missing required configuration: {0}"})
@@ -50,17 +47,12 @@ func ReadConfig(c interface{}) error {
 	switch t.Kind() {
 	case reflect.Ptr, reflect.Interface:
 		val := t.Elem()
-		fields := val.NumField()
-		for i := 0; i < fields; i++ {
+		for i := 0; i < val.NumField(); i++ {
 			value := reflect.ValueOf(c).Elem().Field(i)
-			field := val.Field(i)
-			if err := overwriteFields(field, &value); err != nil {
+			if err := overwriteFields(fs, val.Field(i), &value); err != nil {
 				return err
 			}
 		}
-
-		flag.Parse()
-
 		return v.ValidateStruct(c)
 	case reflect.Struct:
 		return errors.New("configuration to load needs to be a pointer")
@@ -69,59 +61,48 @@ func ReadConfig(c interface{}) error {
 	}
 }
 
-func overwriteFields(f reflect.StructField, v *reflect.Value) error {
+func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) error {
 	switch f.Type.Kind() {
 	case reflect.Struct:
-		t := f.Type
-		fields := t.NumField()
-		for i := 0; i < fields; i++ {
+		for i := 0; i < f.Type.NumField(); i++ {
 			value := v.Field(i)
-			if err := overwriteFields(t.Field(i), &value); err != nil {
+			if err := overwriteFields(fs, f.Type.Field(i), &value); err != nil {
 				return err
 			}
 		}
-
 	case reflect.Int64:
-		return overwriteValue(f, v, setInt64)
-
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt64(fs, v, t) })
 	case reflect.Int:
-		return overwriteValue(f, v, setInt)
-
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setInt(fs, v, t) })
 	case reflect.Float32, reflect.Float64:
-		return overwriteValue(f, v, setFloat64)
-
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setFloat64(fs, v, t) })
 	case reflect.String:
-		return overwriteValue(f, v, setString)
-
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setString(fs, v, t) })
 	case reflect.Bool:
-		return overwriteValue(f, v, setBool)
-
+		return overwriteValue(f, v, func(v *reflect.Value, t reflect.StructTag) error { return setBool(fs, v, t) })
 	case reflect.Slice, reflect.Map:
 		return overwriteValue(f, v, identity)
-
 	default:
 		return fmt.Errorf("invalid field[%s] type[%s]", f.Name, f.Type.Name())
 	}
 	return nil
 }
 
-func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(v *reflect.Value, t reflect.StructTag) error) error {
-	tag := f.Tag
-	if len(tag) > 0 {
-		return setValue(v, tag)
+func overwriteValue(f reflect.StructField, v *reflect.Value, setValue func(*reflect.Value, reflect.StructTag) error) error {
+	if len(f.Tag) > 0 {
+		return setValue(v, f.Tag)
 	}
 	return nil
 }
 
-func setString(v *reflect.Value, t reflect.StructTag) error {
+func setString(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		flag.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
+		fs.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
-		variable := os.Getenv(val)
-		if len(variable) > 0 {
-			v.SetString(os.Getenv(val))
+		if variable := os.Getenv(val); variable != "" {
+			v.SetString(variable)
 			return nil
 		}
 	}
@@ -131,14 +112,13 @@ func setString(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-func setBool(v *reflect.Value, t reflect.StructTag) error {
+func setBool(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		flag.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
+		fs.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
-		value := os.Getenv(val)
-		if len(value) > 0 {
+		if value := os.Getenv(val); value != "" {
 			return parseBool(v, value)
 		}
 	}
@@ -148,26 +128,13 @@ func setBool(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-func parseBool(v *reflect.Value, val string) error {
-	trimmed := strings.TrimSpace(val)
-	if len(trimmed) > 0 {
-		parsed, err := strconv.ParseBool(trimmed)
-		if err != nil {
-			return err
-		}
-		v.SetBool(parsed)
-	}
-	return nil
-}
-
-func setInt64(v *reflect.Value, t reflect.StructTag) error {
+func setInt64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		flag.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
+		fs.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
-		value := os.Getenv(val)
-		if len(value) > 0 {
+		if value := os.Getenv(val); value != "" {
 			return parseInt64(v, value)
 		}
 	}
@@ -177,14 +144,13 @@ func setInt64(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-func setInt(v *reflect.Value, t reflect.StructTag) error {
+func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		flag.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
+		fs.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
-		value := os.Getenv(val)
-		if len(value) > 0 {
+		if value := os.Getenv(val); value != "" {
 			return parseInt64(v, value)
 		}
 	}
@@ -194,26 +160,13 @@ func setInt(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
-func parseInt64(v *reflect.Value, val string) error {
-	trimmed := strings.TrimSpace(val)
-	if len(trimmed) > 0 {
-		parsed, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.SetInt(parsed)
-	}
-	return nil
-}
-
-func setFloat64(v *reflect.Value, t reflect.StructTag) error {
+func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if val, ok := t.Lookup(readFlagKey); ok {
-		flag.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
+		fs.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
 		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
-		value := os.Getenv(val)
-		if len(value) > 0 {
+		if value := os.Getenv(val); value != "" {
 			return parseFloat64(v, value)
 		}
 	}
@@ -227,9 +180,30 @@ func identity(v *reflect.Value, t reflect.StructTag) error {
 	return nil
 }
 
+func parseBool(v *reflect.Value, val string) error {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
+		parsed, err := strconv.ParseBool(trimmed)
+		if err != nil {
+			return err
+		}
+		v.SetBool(parsed)
+	}
+	return nil
+}
+
+func parseInt64(v *reflect.Value, val string) error {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return err
+		}
+		v.SetInt(parsed)
+	}
+	return nil
+}
+
 func parseFloat64(v *reflect.Value, val string) error {
-	trimmed := strings.TrimSpace(val)
-	if len(trimmed) > 0 {
+	if trimmed := strings.TrimSpace(val); trimmed != "" {
 		parsed, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil {
 			return err
@@ -240,9 +214,6 @@ func parseFloat64(v *reflect.Value, val string) error {
 }
 
 func getUsage(tag reflect.StructTag) string {
-	val, ok := tag.Lookup(flagUsage)
-	if ok {
-		return val
-	}
-	return ""
+	val, _ := tag.Lookup(flagUsage)
+	return val
 }
