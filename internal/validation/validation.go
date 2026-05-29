@@ -13,6 +13,9 @@ import (
 // returns an error for the first field whose value is the zero value for its
 // type (e.g. "" for string, 0 for numeric types, false for bool).
 //
+// Unknown rules in the validate tag (e.g. validate:"min=1") return an error
+// immediately so typos fail loudly rather than silently skipping validation.
+//
 // c must be a non-nil pointer to a struct. ValidateRequired recurses into
 // nested structs automatically.
 //
@@ -41,8 +44,15 @@ func walk(t reflect.Type, v reflect.Value) error {
 		}
 
 		for _, rule := range strings.Split(tag, ",") {
-			if strings.TrimSpace(rule) == "required" && value.IsZero() {
-				return fmt.Errorf("missing required configuration: %s", field.Name)
+			switch strings.TrimSpace(rule) {
+			case "required":
+				if value.IsZero() {
+					return fmt.Errorf("missing required configuration: %s", field.Name)
+				}
+			case "":
+				// ignore empty segments from trailing commas
+			default:
+				return fmt.Errorf("unknown validation rule %q on field %s", strings.TrimSpace(rule), field.Name)
 			}
 		}
 	}
