@@ -21,14 +21,19 @@ type Config struct {
     Host    string        `env:"HOST"    default:"localhost"`
     Port    int           `env:"PORT"    default:"8080"`
     Timeout time.Duration `env:"TIMEOUT" default:"30s"`
-    Debug   bool          `env:"DEBUG"`
     APIKey  string        `env:"API_KEY" validate:"required"`
 }
 
 var cfg Config
-if err := gonphig.Load(&cfg); err != nil {
+if err := gonphig.Load(&cfg, gonphig.WithEnvPrefix("APP")); err != nil {
     log.Fatal(err)
 }
+```
+
+Or panic on error in `main`:
+
+```go
+gonphig.Bootstrap(&cfg, gonphig.WithEnvPrefix("APP"))
 ```
 
 ## Source priority
@@ -37,14 +42,16 @@ Sources are evaluated in this order — higher entries win:
 
 | Priority | Source | How to enable |
 |----------|--------|---------------|
-| 1 (highest) | CLI flag | `WithFlags(fs, args)` option + `flag:"name"` tag |
+| 1 (highest) | CLI flag | `WithArgs(args)` or `WithFlags(fs, args)` + `flag:"name"` tag |
 | 2 | Environment variable | always on — `env:"VAR"` tag |
 | 3 | Struct tag default | always on — `default:"value"` tag |
 | 4 (lowest) | YAML file | `WithFile("path")` option |
 
 ## How to use it
 
-### Env vars and defaults (no options needed)
+### Env vars and defaults
+
+Environment variables and struct tag defaults require no options — they are always active.
 
 ```go
 type Config struct {
@@ -59,12 +66,26 @@ if err := gonphig.Load(&cfg); err != nil {
 }
 ```
 
-### Adding a YAML file
+### Env prefix
+
+Use `WithEnvPrefix` to prepend a common prefix to all env var lookups. A field tagged `env:"HOST"` with `WithEnvPrefix("APP")` reads `APP_HOST` from the environment.
+
+```go
+// reads APP_HOST, APP_PORT, APP_DEBUG
+if err := gonphig.Load(&cfg, gonphig.WithEnvPrefix("APP")); err != nil {
+    log.Fatal(err)
+}
+```
+
+### YAML file
 
 YAML values are the lowest-priority source — env vars and flags always override them.
 
 ```go
-if err := gonphig.Load(&cfg, gonphig.WithFile("config.yml")); err != nil {
+if err := gonphig.Load(&cfg,
+    gonphig.WithFile("config.yml"),
+    gonphig.WithEnvPrefix("APP"),
+); err != nil {
     log.Fatal(err)
 }
 ```
@@ -77,9 +98,9 @@ type Config struct {
 }
 ```
 
-### Adding CLI flags
+### CLI flags
 
-Gonphig registers the flags on the provided `FlagSet` and calls `Parse` internally. The caller may register additional flags on the same `FlagSet` before calling `Load`.
+Use `WithArgs` for the simple case — gonphig creates and manages the `FlagSet` internally:
 
 ```go
 type Config struct {
@@ -87,7 +108,17 @@ type Config struct {
     Port int    `flag:"port" flag-usage:"server port"     default:"8080"`
 }
 
+var cfg Config
+if err := gonphig.Load(&cfg, gonphig.WithArgs(os.Args[1:])); err != nil {
+    log.Fatal(err)
+}
+```
+
+Use `WithFlags` when you need control over the `FlagSet` (custom error mode, registering your own flags alongside gonphig's):
+
+```go
 fs := flag.NewFlagSet("myapp", flag.ExitOnError)
+fs.String("log-level", "info", "log verbosity") // your own flag
 
 var cfg Config
 if err := gonphig.Load(&cfg, gonphig.WithFlags(fs, os.Args[1:])); err != nil {
@@ -95,15 +126,16 @@ if err := gonphig.Load(&cfg, gonphig.WithFlags(fs, os.Args[1:])); err != nil {
 }
 ```
 
-### Combining all sources
+### Bootstrap
+
+For `main` functions where a config failure is unrecoverable, `Bootstrap` panics instead of returning an error:
 
 ```go
-if err := gonphig.Load(&cfg,
+gonphig.Bootstrap(&cfg,
     gonphig.WithFile("config.yml"),
-    gonphig.WithFlags(fs, os.Args[1:]),
-); err != nil {
-    log.Fatal(err)
-}
+    gonphig.WithEnvPrefix("APP"),
+    gonphig.WithArgs(os.Args[1:]),
+)
 ```
 
 ### Nested structs
@@ -124,7 +156,9 @@ type Config struct {
 
 ### Validation
 
-Use `validate:"required"` to require a field to be explicitly set. A required field that holds its zero value (`""`, `0`, `false`, `0s`) after all sources are applied will cause `Load` to return an error.
+Use `validate:"required"` to require a field to be explicitly set. A required field that holds its zero value (`""`, `0`, `0s`) after all sources are applied will cause `Load` to return an error.
+
+> **Note:** `validate:"required"` is not supported on `bool` fields — `false` is a valid value that cannot be distinguished from unset. Applying it to a `bool` returns an error at load time.
 
 ```go
 type Config struct {
@@ -143,7 +177,7 @@ type Config struct {
 | `int64`         | ✓     | ✓      | ✓         | ✓                     |
 | `float32`       | ✓     | ✓      | ✓         | ✓                     |
 | `float64`       | ✓     | ✓      | ✓         | ✓                     |
-| `bool`          | ✓     | ✓      | ✓         | ✓                     |
+| `bool`          | ✓     | ✓      | ✓         | —                     |
 | `time.Duration` | ✓     | ✓      | ✓         | ✓                     |
 | `[]string`      | ✓     | —      | ✓         | ✓                     |
 | `map`           | —     | —      | —         | —                     |
@@ -160,10 +194,11 @@ Unsupported field types (channels, funcs, etc.) return an error at load time.
 `Load` returns a non-nil error when:
 
 - A `validate:"required"` field is not set
-- An env var or default value cannot be parsed into the field's type
-- An invalid flag value is passed (when using `flag.ExitOnError`, the program exits)
+- An env var or default value cannot be parsed — error includes the field name
+- An invalid flag value is passed
 - A non-existent file path is provided to `WithFile`
 - The config argument is nil, not a pointer, or a pointer to a non-struct type
+- A nil `FlagSet` is passed to `WithFlags`
 
 ## External resources
 

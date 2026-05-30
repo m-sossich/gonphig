@@ -105,6 +105,16 @@ func WithEnvPrefix(prefix string) Option {
 	}
 }
 
+// Bootstrap loads configuration into c exactly like Load, but panics on error.
+// Intended for use in main functions where a config failure is unrecoverable.
+//
+//	gonphig.Bootstrap(&cfg, gonphig.WithEnvPrefix("APP"))
+func Bootstrap(c any, opts ...Option) {
+	if err := Load(c, opts...); err != nil {
+		panic(err)
+	}
+}
+
 // Load reads configuration into c from all enabled sources, applying them in
 // priority order: flags > env vars > struct tag defaults > YAML file.
 //
@@ -140,6 +150,9 @@ func Load(c any, opts ...Option) error {
 		opt(s)
 	}
 
+	if s.hasFlags && s.fs == nil {
+		return errors.New("flag set must not be nil")
+	}
 	if !s.hasFlags {
 		s.fs = flag.NewFlagSet("", flag.ContinueOnError)
 	}
