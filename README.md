@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="https://raw.githubusercontent.com/m-sossich/gonphig/main/.github/logo.png" width="300">
+    <img src="https://github.com/user-attachments/assets/41704e02-aaa5-4b3e-b601-f3bfaa7f2167" width="300">
 </div><br/>
 
 [![Go](https://github.com/m-sossich/gonphig/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/m-sossich/gonphig/actions/workflows/go.yml)
