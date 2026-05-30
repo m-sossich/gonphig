@@ -11,7 +11,10 @@ import (
 
 // ValidateRequired inspects c for fields tagged validate:"required" and
 // returns an error for the first field whose value is the zero value for its
-// type (e.g. "" for string, 0 for numeric types, false for bool).
+// type (e.g. "" for string, 0 for numeric types).
+//
+// validate:"required" is not supported on bool fields — false is a valid value
+// that cannot be distinguished from unset. Using it on a bool returns an error.
 //
 // Unknown rules in the validate tag (e.g. validate:"min=1") return an error
 // immediately so typos fail loudly rather than silently skipping validation.
@@ -46,6 +49,13 @@ func walk(t reflect.Type, v reflect.Value) error {
 		for _, rule := range strings.Split(tag, ",") {
 			switch strings.TrimSpace(rule) {
 			case "required":
+				if field.Type.Kind() == reflect.Bool {
+					return fmt.Errorf(
+						"validate:\"required\" is not supported on bool field %s — "+
+							"false is a valid value that cannot be distinguished from unset",
+						field.Name,
+					)
+				}
 				if value.IsZero() {
 					return fmt.Errorf("missing required configuration: %s", field.Name)
 				}

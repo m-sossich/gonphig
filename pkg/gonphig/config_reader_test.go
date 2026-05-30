@@ -419,7 +419,7 @@ func TestRequiredIntFailsOnZero(t *testing.T) {
 	assert.Equal(t, "missing required configuration: Port", err.Error())
 }
 
-func TestRequiredBoolFailsOnFalse(t *testing.T) {
+func TestRequiredBoolFailsWithUnsupportedError(t *testing.T) {
 	type testType struct {
 		Enabled bool `validate:"required"`
 	}
@@ -427,7 +427,7 @@ func TestRequiredBoolFailsOnFalse(t *testing.T) {
 	var config testType
 	err := Load(&config)
 	require.Error(t, err)
-	assert.Equal(t, "missing required configuration: Enabled", err.Error())
+	assert.Contains(t, err.Error(), "not supported on bool field")
 }
 
 func TestRequiredDurationFailsOnZero(t *testing.T) {
@@ -463,6 +463,119 @@ func TestUnknownValidateRuleReturnsError(t *testing.T) {
 	err := Load(&config)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown validation rule")
+}
+
+// --- WithArgs ---
+
+func TestWithArgs(t *testing.T) {
+	type testType struct {
+		Host string `flag:"host" default:"localhost"`
+		Port int    `flag:"port" default:"8080"`
+	}
+
+	var config testType
+	err := Load(&config, WithArgs([]string{"--host=myserver", "--port=9090"}))
+	require.NoError(t, err)
+	assert.Equal(t, "myserver", config.Host)
+	assert.Equal(t, 9090, config.Port)
+}
+
+func TestWithArgsDefaultFallback(t *testing.T) {
+	type testType struct {
+		Host string `flag:"host" default:"localhost"`
+	}
+
+	var config testType
+	err := Load(&config, WithArgs([]string{}))
+	require.NoError(t, err)
+	assert.Equal(t, "localhost", config.Host)
+}
+
+// --- WithEnvPrefix ---
+
+func TestWithEnvPrefix(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST"`
+		Port int    `env:"PORT" default:"8080"`
+	}
+
+	t.Setenv("APP_HOST", "prefixed-host")
+	t.Setenv("APP_PORT", "9090")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("APP"))
+	require.NoError(t, err)
+	assert.Equal(t, "prefixed-host", config.Host)
+	assert.Equal(t, 9090, config.Port)
+}
+
+func TestWithEnvPrefixDoesNotMatchUnprefixed(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST" default:"fallback"`
+	}
+
+	t.Setenv("HOST", "unprefixed")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("APP"))
+	require.NoError(t, err)
+	// APP_HOST is not set, so default is used — unprefixed HOST is ignored
+	assert.Equal(t, "fallback", config.Host)
+}
+
+func TestWithEnvPrefixUppercasesPrefix(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST"`
+	}
+
+	t.Setenv("APP_HOST", "ok")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("app"))
+	require.NoError(t, err)
+	assert.Equal(t, "ok", config.Host)
+}
+
+// --- Error messages include field name ---
+
+func TestParseErrorIncludesFieldName(t *testing.T) {
+	type testType struct {
+		Port int `env:"BAD_PORT"`
+	}
+
+	t.Setenv("BAD_PORT", "not-an-int")
+
+	var config testType
+	err := Load(&config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Port")
+}
+
+func TestDurationParseErrorIncludesFieldName(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `env:"BAD_TIMEOUT"`
+	}
+
+	t.Setenv("BAD_TIMEOUT", "not-a-duration")
+
+	var config testType
+	err := Load(&config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Timeout")
+}
+
+// --- Bool + required ---
+
+func TestRequiredBoolReturnsUnsupportedError(t *testing.T) {
+	type testType struct {
+		Enabled bool `validate:"required"`
+	}
+
+	var config testType
+	err := Load(&config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported on bool field")
+	assert.Contains(t, err.Error(), "Enabled")
 }
 
 // --- Input validation ---
