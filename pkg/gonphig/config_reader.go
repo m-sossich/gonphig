@@ -3,11 +3,9 @@
 // CLI flags (highest) → environment variables → struct tag defaults → YAML
 // file (lowest).
 //
-// The two entry points are ReadConfig and ReadFromFile. Both require a pointer
-// to a struct and a *flag.FlagSet. Gonphig registers flags on the provided
-// FlagSet but never calls Parse — the caller owns that step, ensuring gonphig
-// is safe to use from libraries, CLIs, and tests without polluting global
-// flag state.
+// The single entry point is Load. Environment variables and struct tag
+// defaults are always considered. Additional sources — YAML files and CLI
+// flags — are enabled via options.
 //
 // # Supported field types
 //
@@ -18,15 +16,14 @@
 //
 // # Struct tags
 //
-//   - flag:"name"         bind to a CLI flag
+//   - flag:"name"         bind to a CLI flag (requires WithFlags option)
 //   - flag-usage:"txt"    usage string shown in --help (optional, use with flag)
 //   - env:"VAR"           bind to an environment variable
-//   - default:"val"       fallback when no flag or env var is set
-//   - validate:"required" return an error if the field is the zero value after loading
-//   - yaml:"name"         rename the field in a YAML source file
+//   - default:"val"       fallback when no higher-priority source sets the field
+//   - validate:"required" return an error if the field is zero after loading
+//   - yaml:"name"         rename the field when reading from a YAML file
 //
-// Tags may be combined freely. When a field has both flag and default tags, the
-// default value is used as the flag's default so --help shows meaningful output.
+// Tags may be combined freely on the same field.
 package gonphig
 
 import (
@@ -49,87 +46,119 @@ const (
 	flagUsage   = "flag-usage"
 )
 
-// ReadFromFile loads configuration into c from a YAML file at configPath,
-// then overlays values from environment variables and registers CLI flags on
-// fs, following the standard source priority (flags > env > default > YAML).
-//
-// The YAML file is the lowest-priority source. Any field bound to an env var
-// or flag tag will override what the file provides.
-//
-// The caller must call fs.Parse after ReadFromFile returns so that registered
-// flags are populated from the command line.
-//
-// fs must not be nil. c must be a non-nil pointer to a struct. Passing a
-// non-pointer or a pointer to a non-struct type returns an error.
-func ReadFromFile(configPath string, fs *flag.FlagSet, c any) error {
-	if fs == nil {
-		return errors.New("flag set must not be nil")
-	}
-	configFile, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-	if err = yaml.Unmarshal(configFile, c); err != nil {
-		return err
-	}
-	return ReadConfig(fs, c)
+// Option configures Load. Options are created by WithFile and WithFlags.
+type Option func(*settings)
+
+type settings struct {
+	filePath string
+	hasFile  bool
+	fs       *flag.FlagSet
+	args     []string
+	hasFlags bool
 }
 
-// ReadConfig loads configuration into c from environment variables and struct
-// tag defaults, and registers CLI flags on fs.
-//
-// Source priority: flags (after fs.Parse) > env vars > default tag values.
-// For YAML-based configuration use ReadFromFile instead.
-//
-// The caller must call fs.Parse after ReadConfig returns so that registered
-// flags are populated from the command line. Pass flag.CommandLine to use the
-// standard global flag set, or a custom *flag.FlagSet for isolation in tests
-// or libraries.
-//
-// fs must not be nil. c must be a non-nil pointer to a struct. Passing a
-// non-pointer, nil, or a pointer to a non-struct type returns an error.
-// Unsupported field types (e.g. chan, func) return an error at load time.
-//
-// If any field is tagged validate:"required" and its value remains the zero
-// value after all sources are applied, ReadConfig returns an error.
-func ReadConfig(fs *flag.FlagSet, c any) error {
-	if fs == nil {
-		return errors.New("flag set must not be nil")
+// WithFile enables a YAML file as a configuration source.
+// YAML is the lowest-priority source — it is overridden by env vars, struct
+// tag defaults, and flags.
+func WithFile(path string) Option {
+	return func(s *settings) {
+		s.filePath = path
+		s.hasFile = true
 	}
+}
+
+// WithFlags enables CLI flags as the highest-priority source.
+// Gonphig registers flags on fs, then calls fs.Parse(args) internally.
+// args is typically os.Args[1:].
+// The caller may register additional flags on fs before calling Load.
+func WithFlags(fs *flag.FlagSet, args []string) Option {
+	return func(s *settings) {
+		s.fs = fs
+		s.args = args
+		s.hasFlags = true
+	}
+}
+
+// Load reads configuration into c from all enabled sources, applying them in
+// priority order: flags > env vars > struct tag defaults > YAML file.
+//
+// Environment variables and struct tag defaults are always considered.
+// Additional sources are enabled via WithFile and WithFlags.
+//
+// c must be a non-nil pointer to a struct. Passing nil, a non-pointer, or a
+// pointer to a non-struct type returns an error. Unsupported field types
+// (e.g. chan, func) return an error at load time.
+//
+// If any field is tagged validate:"required" and its value remains zero after
+// all sources are applied, Load returns an error.
+func Load(c any, opts ...Option) error {
 	if c == nil {
 		return errors.New("configuration must not be nil")
 	}
 
 	t := reflect.TypeOf(c)
-
 	switch t.Kind() {
 	case reflect.Ptr:
-		val := t.Elem()
-		if val.Kind() != reflect.Struct {
+		if t.Elem().Kind() != reflect.Struct {
 			return errors.New("invalid configuration structure")
 		}
-		rv := reflect.ValueOf(c).Elem()
-		for i := 0; i < val.NumField(); i++ {
-			value := rv.Field(i)
-			if err := overwriteFields(fs, val.Field(i), &value); err != nil {
-				return err
-			}
-		}
-		return validation.ValidateRequired(c)
 	case reflect.Struct:
 		return errors.New("configuration to load needs to be a pointer")
 	default:
 		return errors.New("invalid configuration structure")
 	}
+
+	s := &settings{}
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	// Use a throwaway FlagSet when no WithFlags option is provided.
+	// Flags registered on it are never parsed, so flag tags have no effect.
+	if !s.hasFlags {
+		s.fs = flag.NewFlagSet("", flag.ContinueOnError)
+	}
+
+	// Step 1: load YAML as the baseline (lowest priority).
+	if s.hasFile {
+		data, err := os.ReadFile(s.filePath)
+		if err != nil {
+			return err
+		}
+		if err = yaml.Unmarshal(data, c); err != nil {
+			return err
+		}
+	}
+
+	// Step 2: apply defaults, env vars, and register flags — in that order
+	// so that each step can override the previous one. After registration,
+	// Parse will let flag values override env values.
+	rv := reflect.ValueOf(c).Elem()
+	val := t.Elem()
+	for i := 0; i < val.NumField(); i++ {
+		value := rv.Field(i)
+		if err := overwriteFields(s.fs, val.Field(i), &value); err != nil {
+			return err
+		}
+	}
+
+	// Step 3: parse flags so CLI values override everything set so far.
+	if s.hasFlags {
+		if err := s.fs.Parse(s.args); err != nil {
+			return err
+		}
+	}
+
+	return validation.ValidateRequired(c)
 }
 
 // durationType is used to detect time.Duration fields by named type before
 // the reflect.Int64 case in the kind switch, since Duration's Kind() is Int64.
 var durationType = reflect.TypeOf(time.Duration(0))
 
-// overwriteFields applies tag-driven values (flag, env, default) to a single
-// struct field. It recurses into nested structs. time.Duration is matched by
-// named type before the kind switch to avoid being treated as a raw int64.
+// overwriteFields applies default, env, and flag tags to a single struct
+// field in that order. It recurses into nested structs. time.Duration is
+// matched by named type before the kind switch to avoid being treated as int64.
 func overwriteFields(fs *flag.FlagSet, f reflect.StructField, v *reflect.Value) error {
 	if f.Type == durationType {
 		return overwriteValue(f.Tag, v, func(v *reflect.Value, t reflect.StructTag) error { return setDuration(fs, v, t) })
@@ -177,101 +206,82 @@ func overwriteValue(tag reflect.StructTag, v *reflect.Value, setValue func(*refl
 	return nil
 }
 
-// setString applies the flag, env, or default tag to a string field.
-// When a flag tag is present the default tag value (if any) is used as the
-// flag's default so that --help displays a meaningful value.
+// setString applies default → env → flag registration to a string field.
+// The default is only applied when the field is still the zero value, so
+// YAML-loaded values are not overwritten by defaults.
 func setString(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := v.String()
-		if d, ok := t.Lookup(defaultKey); ok && d != "" {
-			def = strings.TrimSpace(d)
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok && def != "" {
+			v.SetString(strings.TrimSpace(def))
 		}
-		fs.StringVar(v.Addr().Interface().(*string), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if variable := os.Getenv(val); variable != "" {
 			v.SetString(variable)
-			return nil
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok && def != "" {
-		v.SetString(strings.TrimSpace(def))
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
 	}
 	return nil
 }
 
-// setBool applies the flag, env, or default tag to a bool field.
-// When a flag tag is present the default tag value (if any) is used as the
-// flag's default so that --help displays a meaningful value.
+// setBool applies default → env → flag registration to a bool field.
 func setBool(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := v.Bool()
-		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := strconv.ParseBool(strings.TrimSpace(d)); err == nil {
-				def = parsed
-			}
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseBool(v, strings.ToLower(def))
 		}
-		fs.BoolVar(v.Addr().Interface().(*bool), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseBool(v, value)
+			if err := parseBool(v, value); err != nil {
+				return err
+			}
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseBool(v, strings.ToLower(def))
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
 	}
 	return nil
 }
 
-// setInt64 applies the flag, env, or default tag to an int64 field.
-// When a flag tag is present the default tag value (if any) is used as the
-// flag's default so that --help displays a meaningful value.
+// setInt64 applies default → env → flag registration to an int64 field.
 func setInt64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := v.Int()
-		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := strconv.ParseInt(strings.TrimSpace(d), 10, 64); err == nil {
-				def = parsed
-			}
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseInt64(v, def)
 		}
-		fs.Int64Var(v.Addr().Interface().(*int64), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseInt64(v, value)
+			if err := parseInt64(v, value); err != nil {
+				return err
+			}
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseInt64(v, def)
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
 	}
 	return nil
 }
 
-// setInt applies the flag, env, or default tag to an int field.
-// When a flag tag is present the default tag value (if any) is used as the
-// flag's default so that --help displays a meaningful value.
+// setInt applies default → env → flag registration to an int field.
 func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := int(v.Int())
-		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := strconv.ParseInt(strings.TrimSpace(d), 10, 64); err == nil {
-				def = int(parsed)
-			}
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseInt64(v, def)
 		}
-		fs.IntVar(v.Addr().Interface().(*int), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseInt64(v, value)
+			if err := parseInt64(v, value); err != nil {
+				return err
+			}
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseInt64(v, def)
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
 	}
 	return nil
 }
@@ -279,8 +289,8 @@ func setInt(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 // float32Flag implements flag.Value for float32 fields. The flag package has
 // no Float32Var, so a custom flag.Value is used instead. Unlike fs.XxxVar
 // which writes the default directly, fs.Var only reads String() for display —
-// so setFloat32 writes the default to the field before registering the flag,
-// then String() reflects that value back for --help output.
+// so setFloat32 writes the default/env value to the field before registering
+// the flag, then String() reflects that value back for --help output.
 type float32Flag struct{ v *reflect.Value }
 
 func (f float32Flag) String() string {
@@ -291,89 +301,78 @@ func (f float32Flag) Set(s string) error {
 	return parseFloat(f.v, s, 32)
 }
 
-// setFloat32 applies the flag, env, or default tag to a float32 field.
-// When a flag tag is present, the default (if any) is written to the field
-// before registering the flag so String() returns the correct default for
-// --help. This differs from other setters only because the flag package has
-// no native Float32Var — the observable behaviour is identical.
+// setFloat32 applies default → env → flag registration to a float32 field.
 func setFloat32(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		if d, ok := t.Lookup(defaultKey); ok {
-			// Write default before fs.Var so String() reflects it in --help.
-			_ = parseFloat(v, d, 32)
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseFloat(v, def, 32)
 		}
+	}
+	if val, ok := t.Lookup(readEnvKey); ok {
+		if value := os.Getenv(val); value != "" {
+			if err := parseFloat(v, value, 32); err != nil {
+				return err
+			}
+		}
+	}
+	if val, ok := t.Lookup(readFlagKey); ok {
 		fs.Var(float32Flag{v}, val, getUsage(t))
-		return nil
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := os.Getenv(val); value != "" {
-			return parseFloat(v, value, 32)
-		}
-	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseFloat(v, def, 32)
 	}
 	return nil
 }
 
-// setFloat64 applies the flag, env, or default tag to a float64 field.
-// When a flag tag is present the default tag value (if any) is used as
-// the flag's default so that --help displays a meaningful value.
+// setFloat64 applies default → env → flag registration to a float64 field.
 func setFloat64(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := v.Float()
-		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(d), 64); err == nil {
-				def = parsed
-			}
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseFloat(v, def, 64)
 		}
-		fs.Float64Var(v.Addr().Interface().(*float64), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if value := os.Getenv(val); value != "" {
-			return parseFloat(v, value, 64)
+			if err := parseFloat(v, value, 64); err != nil {
+				return err
+			}
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseFloat(v, def, 64)
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
 	}
 	return nil
 }
 
-// setDuration applies the flag, env, or default tag to a time.Duration field.
-// Values are parsed with time.ParseDuration, accepting strings such as "5s",
-// "1m30s", or "2h". When a flag tag is present the default tag value (if any)
-// is used as the flag's default so that --help displays a meaningful value.
+// setDuration applies default → env → flag registration to a time.Duration
+// field. Values are parsed with time.ParseDuration (e.g. "5s", "1m30s").
 func setDuration(fs *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
-	if val, ok := t.Lookup(readFlagKey); ok {
-		def := time.Duration(v.Int())
-		if d, ok := t.Lookup(defaultKey); ok {
-			if parsed, err := time.ParseDuration(strings.TrimSpace(d)); err == nil {
-				def = parsed
-			}
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			_ = parseDuration(v, def)
 		}
-		fs.DurationVar(v.Addr().Interface().(*time.Duration), val, def, getUsage(t))
-		return nil
 	}
 	if val, ok := t.Lookup(readEnvKey); ok {
 		if raw := os.Getenv(val); raw != "" {
-			return parseDuration(v, raw)
+			if err := parseDuration(v, raw); err != nil {
+				return err
+			}
 		}
 	}
-	if def, ok := t.Lookup(defaultKey); ok {
-		return parseDuration(v, def)
+	if val, ok := t.Lookup(readFlagKey); ok {
+		fs.DurationVar(v.Addr().Interface().(*time.Duration), val, time.Duration(v.Int()), getUsage(t))
 	}
 	return nil
 }
 
-// setStringSlice applies the env or default tag to a []string field.
+// setStringSlice applies default → env to a []string field.
 // Values are parsed as a comma-separated list; whitespace around each entry
 // is trimmed. The flag tag is not supported for slice fields and returns an
 // error if present.
 func setStringSlice(_ *flag.FlagSet, v *reflect.Value, t reflect.StructTag) error {
 	if _, ok := t.Lookup(readFlagKey); ok {
 		return fmt.Errorf("flag tag is not supported for slice fields")
+	}
+	// Only apply default/env if YAML hasn't already populated the slice.
+	if !v.IsNil() {
+		return nil
 	}
 	var raw string
 	if val, ok := t.Lookup(readEnvKey); ok {
