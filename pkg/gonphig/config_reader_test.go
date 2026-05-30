@@ -491,6 +491,16 @@ func TestWithArgsDefaultFallback(t *testing.T) {
 	assert.Equal(t, "localhost", config.Host)
 }
 
+func TestWithArgsInvalidFlagReturnsError(t *testing.T) {
+	type testType struct {
+		Port int `flag:"port"`
+	}
+
+	var config testType
+	err := Load(&config, WithArgs([]string{"--port=notanint"}))
+	require.Error(t, err)
+}
+
 // --- WithEnvPrefix ---
 
 func TestWithEnvPrefix(t *testing.T) {
@@ -536,6 +546,64 @@ func TestWithEnvPrefixUppercasesPrefix(t *testing.T) {
 	assert.Equal(t, "ok", config.Host)
 }
 
+func TestWithEnvPrefixNestedStruct(t *testing.T) {
+	type testType struct {
+		DB struct {
+			Host string `env:"HOST"`
+			Port int    `env:"PORT"`
+		}
+	}
+
+	t.Setenv("APP_HOST", "db-host")
+	t.Setenv("APP_PORT", "5432")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("APP"))
+	require.NoError(t, err)
+	assert.Equal(t, "db-host", config.DB.Host)
+	assert.Equal(t, 5432, config.DB.Port)
+}
+
+func TestWithEnvPrefixDuration(t *testing.T) {
+	type testType struct {
+		Timeout time.Duration `env:"TIMEOUT"`
+	}
+
+	t.Setenv("SVC_TIMEOUT", "10s")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("SVC"))
+	require.NoError(t, err)
+	assert.Equal(t, 10*time.Second, config.Timeout)
+}
+
+func TestWithEnvPrefixStringSlice(t *testing.T) {
+	type testType struct {
+		Hosts []string `env:"HOSTS"`
+	}
+
+	t.Setenv("SVC_HOSTS", "a,b,c")
+
+	var config testType
+	err := Load(&config, WithEnvPrefix("SVC"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "c"}, config.Hosts)
+}
+
+func TestWithEnvPrefixWithFile(t *testing.T) {
+	type testType struct {
+		Field string `yaml:"field" env:"FIELD"`
+	}
+
+	t.Setenv("APP_FIELD", "from-env")
+
+	var config testType
+	err := Load(&config, WithFile(configTestFile), WithEnvPrefix("APP"))
+	require.NoError(t, err)
+	// Env wins over YAML
+	assert.Equal(t, "from-env", config.Field)
+}
+
 // --- Error messages include field name ---
 
 func TestParseErrorIncludesFieldName(t *testing.T) {
@@ -564,6 +632,32 @@ func TestDurationParseErrorIncludesFieldName(t *testing.T) {
 	assert.Contains(t, err.Error(), "Timeout")
 }
 
+func TestFloatParseErrorIncludesFieldName(t *testing.T) {
+	type testType struct {
+		Rate float64 `env:"BAD_RATE"`
+	}
+
+	t.Setenv("BAD_RATE", "not-a-float")
+
+	var config testType
+	err := Load(&config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Rate")
+}
+
+func TestBoolParseErrorIncludesFieldName(t *testing.T) {
+	type testType struct {
+		Debug bool `env:"BAD_DEBUG"`
+	}
+
+	t.Setenv("BAD_DEBUG", "not-a-bool")
+
+	var config testType
+	err := Load(&config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Debug")
+}
+
 // --- Bool + required ---
 
 func TestRequiredBoolReturnsUnsupportedError(t *testing.T) {
@@ -576,6 +670,54 @@ func TestRequiredBoolReturnsUnsupportedError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported on bool field")
 	assert.Contains(t, err.Error(), "Enabled")
+}
+
+// --- WithFlags nil guard ---
+
+func TestWithFlagsNilFlagSetReturnsError(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST"`
+	}
+
+	var config testType
+	err := Load(&config, WithFlags(nil, []string{}))
+	require.Error(t, err)
+	assert.Equal(t, "flag set must not be nil", err.Error())
+}
+
+// --- Bootstrap ---
+
+func TestBootstrapWithOptions(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST" default:"localhost"`
+	}
+
+	t.Setenv("APP_HOST", "prefixed")
+
+	var config testType
+	assert.NotPanics(t, func() {
+		Bootstrap(&config, WithEnvPrefix("APP"))
+	})
+	assert.Equal(t, "prefixed", config.Host)
+}
+
+func TestBootstrapSucceeds(t *testing.T) {
+	type testType struct {
+		Host string `default:"localhost"`
+	}
+
+	var config testType
+	assert.NotPanics(t, func() { Bootstrap(&config) })
+	assert.Equal(t, "localhost", config.Host)
+}
+
+func TestBootstrapPanicsOnError(t *testing.T) {
+	type testType struct {
+		Host string `validate:"required"`
+	}
+
+	var config testType
+	assert.Panics(t, func() { Bootstrap(&config) })
 }
 
 // --- Input validation ---
