@@ -249,6 +249,20 @@ func (l *loader) applyTagSources(v *reflect.Value, t reflect.StructTag, parse fu
 	return nil
 }
 
+// applyField applies all tag sources (default, env, flag) to v.
+// parse handles default and env values; registerFlag wires up the CLI flag
+// using the current field value — already resolved from lower-priority sources
+// — as the flag default.
+func (l *loader) applyField(v *reflect.Value, t reflect.StructTag, parse func(string) error, registerFlag func(name, usage string)) error {
+	if err := l.applyTagSources(v, t, parse); err != nil {
+		return err
+	}
+	if name, ok := t.Lookup(readFlagKey); ok {
+		registerFlag(name, getUsage(t))
+	}
+	return nil
+}
+
 // getenv looks up key in the environment. Priority: real env var (with prefix
 // when set) → .env file value (raw key, no prefix) → "".
 func (l *loader) getenv(key string) string {
@@ -341,52 +355,31 @@ func overwriteValue(tag reflect.StructTag, v *reflect.Value, setValue func(*refl
 }
 
 func (l *loader) setString(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		v.SetString(strings.TrimSpace(s))
-		return nil
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { v.SetString(strings.TrimSpace(s)); return nil },
+		func(name, usage string) { l.fs.StringVar(v.Addr().Interface().(*string), name, v.String(), usage) },
+	)
 }
 
 func (l *loader) setBool(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseBool(v, s)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseBool(v, s) },
+		func(name, usage string) { l.fs.BoolVar(v.Addr().Interface().(*bool), name, v.Bool(), usage) },
+	)
 }
 
 func (l *loader) setInt64(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseInt64(v, s)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseInt64(v, s) },
+		func(name, usage string) { l.fs.Int64Var(v.Addr().Interface().(*int64), name, v.Int(), usage) },
+	)
 }
 
 func (l *loader) setInt(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseInt64(v, s)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseInt64(v, s) },
+		func(name, usage string) { l.fs.IntVar(v.Addr().Interface().(*int), name, int(v.Int()), usage) },
+	)
 }
 
 // float32Flag implements flag.Value for float32 fields. The flag package has
@@ -405,39 +398,26 @@ func (f float32Flag) Set(s string) error {
 }
 
 func (l *loader) setFloat32(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseFloat(v, s, 32)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Var(float32Flag{v}, val, getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseFloat(v, s, 32) },
+		func(name, usage string) { l.fs.Var(float32Flag{v}, name, usage) },
+	)
 }
 
 func (l *loader) setFloat64(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseFloat(v, s, 64)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseFloat(v, s, 64) },
+		func(name, usage string) { l.fs.Float64Var(v.Addr().Interface().(*float64), name, v.Float(), usage) },
+	)
 }
 
 func (l *loader) setDuration(v *reflect.Value, t reflect.StructTag) error {
-	if err := l.applyTagSources(v, t, func(s string) error {
-		return parseDuration(v, s)
-	}); err != nil {
-		return err
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.DurationVar(v.Addr().Interface().(*time.Duration), val, time.Duration(v.Int()), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseDuration(v, s) },
+		func(name, usage string) {
+			l.fs.DurationVar(v.Addr().Interface().(*time.Duration), name, time.Duration(v.Int()), usage)
+		},
+	)
 }
 
 // setStringSlice applies default → env to a []string field.
