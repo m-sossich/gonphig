@@ -1,7 +1,10 @@
 // Package gonphig loads configuration from multiple sources into a typed Go
 // struct using struct tags. Sources are merged in a fixed priority order:
-// CLI flags (highest) → environment variables → struct tag defaults → YAML
-// file (lowest).
+// CLI flags (highest) → environment variables → .env file → struct tag
+// defaults → YAML file (lowest).
+//
+// .env files are resolved via the env struct tag — fields without an env tag
+// are not reachable from a .env file.
 //
 // The single entry point is Load. Environment variables and struct tag
 // defaults are always considered. Additional sources — YAML files and CLI
@@ -12,7 +15,8 @@
 // string, int, int64, float32, float64, bool, time.Duration, and []string are
 // supported. []string values are read as comma-separated strings from env vars
 // and the default tag. time.Duration values accept any string understood by
-// time.ParseDuration (e.g. "5s", "1m30s").
+// time.ParseDuration (e.g. "5s", "1m30s"). In YAML, always use the string
+// form — a bare integer zero (timeout: 0) is rejected; write timeout: 0s.
 //
 // # Struct tags
 //
@@ -30,8 +34,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/m-sossich/gonphig/internal/parser"
 	"github.com/m-sossich/gonphig/internal/validation"
-	"gopkg.in/yaml.v3"
 	"os"
 	"reflect"
 	"strconv"
@@ -59,9 +63,10 @@ type settings struct {
 	envPrefix string
 }
 
-// WithFile enables a YAML file as a configuration source.
-// YAML is the lowest-priority source — it is overridden by env vars, struct
-// tag defaults, and flags.
+// WithFile enables a file as a configuration source, dispatching to the
+// appropriate parser based on the file extension (.yml/.yaml for YAML,
+// .env for dotenv). File values are the lowest-priority source — they are
+// overridden by env vars and flags.
 func WithFile(path string) Option {
 	return func(s *settings) {
 		s.filePath = path
@@ -116,7 +121,7 @@ func Bootstrap(c any, opts ...Option) {
 }
 
 // Load reads configuration into c from all enabled sources, applying them in
-// priority order: flags > env vars > struct tag defaults > YAML file.
+// priority order: flags > env vars > .env file > struct tag defaults > file.
 //
 // Environment variables and struct tag defaults are always considered.
 // Additional sources are enabled via WithFile, WithArgs, and WithFlags.
@@ -129,14 +134,33 @@ func Bootstrap(c any, opts ...Option) {
 // If any field is tagged validate:"required" and its value remains zero after
 // all sources are applied, Load returns an error.
 func Load(c any, opts ...Option) error {
+	if err := validateInput(c); err != nil {
+		return err
+	}
+	s, err := buildSettings(opts)
+	if err != nil {
+		return err
+	}
+	l := &loader{fs: s.fs, envPrefix: s.envPrefix}
+	if err := l.loadFile(c, s); err != nil {
+		return err
+	}
+	if err := l.applyFields(c); err != nil {
+		return err
+	}
+	if err := s.parseFlags(); err != nil {
+		return err
+	}
+	return validation.ValidateRequired(c)
+}
+
+func validateInput(c any) error {
 	if c == nil {
 		return errors.New("configuration must not be nil")
 	}
-
-	t := reflect.TypeOf(c)
-	switch t.Kind() {
+	switch reflect.TypeOf(c).Kind() {
 	case reflect.Ptr:
-		if t.Elem().Kind() != reflect.Struct {
+		if reflect.TypeOf(c).Elem().Kind() != reflect.Struct {
 			return errors.New("invalid configuration structure")
 		}
 	case reflect.Struct:
@@ -144,65 +168,116 @@ func Load(c any, opts ...Option) error {
 	default:
 		return errors.New("invalid configuration structure")
 	}
+	return nil
+}
 
+func buildSettings(opts []Option) (*settings, error) {
 	s := &settings{}
 	for _, opt := range opts {
 		opt(s)
 	}
-
 	if s.hasFlags && s.fs == nil {
-		return errors.New("flag set must not be nil")
+		return nil, errors.New("flag set must not be nil")
 	}
 	if !s.hasFlags {
 		s.fs = flag.NewFlagSet("", flag.ContinueOnError)
 	}
+	return s, nil
+}
 
-	l := &loader{fs: s.fs, envPrefix: s.envPrefix}
-
-	// Step 1: load YAML as the baseline (lowest priority).
-	if s.hasFile {
-		data, err := os.ReadFile(s.filePath)
-		if err != nil {
-			return err
-		}
-		if err = yaml.Unmarshal(data, c); err != nil {
-			return err
-		}
+func (s *settings) parseFlags() error {
+	if !s.hasFlags {
+		return nil
 	}
+	return s.fs.Parse(s.args)
+}
 
-	// Step 2: apply defaults, env vars, and register flags.
+func (l *loader) loadFile(c any, s *settings) error {
+	if !s.hasFile {
+		return nil
+	}
+	parse, kind, err := parser.Lookup(s.filePath)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case parser.KindStruct:
+		return parse(data, c)
+	case parser.KindKV:
+		return parse(data, &l.dotenvVars)
+	}
+	return nil
+}
+
+func (l *loader) applyFields(c any) error {
 	rv := reflect.ValueOf(c).Elem()
-	val := t.Elem()
-	for i := 0; i < val.NumField(); i++ {
+	rt := reflect.TypeOf(c).Elem()
+	for i := 0; i < rt.NumField(); i++ {
 		value := rv.Field(i)
-		if err := l.overwriteFields(val.Field(i), &value); err != nil {
+		if err := l.overwriteFields(rt.Field(i), &value); err != nil {
 			return err
 		}
 	}
-
-	// Step 3: parse flags so CLI values override everything set so far.
-	if s.hasFlags {
-		if err := s.fs.Parse(s.args); err != nil {
-			return err
-		}
-	}
-
-	return validation.ValidateRequired(c)
+	return nil
 }
 
-// loader carries per-Load context (FlagSet, env prefix) so it does not need
-// to be threaded through every setter function signature.
+// loader carries per-Load context (FlagSet, env prefix, dotenv values) so it
+// does not need to be threaded through every setter function signature.
 type loader struct {
-	fs        *flag.FlagSet
-	envPrefix string
+	fs         *flag.FlagSet
+	envPrefix  string
+	dotenvVars map[string]string
 }
 
-// getenv looks up key in the environment, applying the env prefix when set.
-func (l *loader) getenv(key string) string {
-	if l.envPrefix != "" {
-		return os.Getenv(l.envPrefix + "_" + key)
+// applyTagSources resolves the default and env tag sources for v using parse.
+// The default is applied only when v is zero; env always wins when the variable
+// resolves to a non-empty string. Default parse errors are silently ignored;
+// env parse errors are returned.
+func (l *loader) applyTagSources(v *reflect.Value, t reflect.StructTag, parse func(string) error) error {
+	if v.IsZero() {
+		if def, ok := t.Lookup(defaultKey); ok && def != "" {
+			_ = parse(def)
+		}
 	}
-	return os.Getenv(key)
+	if key, ok := t.Lookup(readEnvKey); ok {
+		if raw := l.getenv(key); raw != "" {
+			if err := parse(raw); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// applyField applies all tag sources (default, env, flag) to v.
+// parse handles default and env values; registerFlag wires up the CLI flag
+// using the current field value — already resolved from lower-priority sources
+// — as the flag default.
+func (l *loader) applyField(v *reflect.Value, t reflect.StructTag, parse func(string) error, registerFlag func(name, usage string)) error {
+	if err := l.applyTagSources(v, t, parse); err != nil {
+		return err
+	}
+	if name, ok := t.Lookup(readFlagKey); ok {
+		registerFlag(name, getUsage(t))
+	}
+	return nil
+}
+
+// getenv looks up key in the environment. Priority: real env var (with prefix
+// when set) → .env file value (raw key, no prefix) → "".
+func (l *loader) getenv(key string) string {
+	envKey := key
+	if l.envPrefix != "" {
+		envKey = l.envPrefix + "_" + key
+	}
+	if val := os.Getenv(envKey); val != "" {
+		return val
+	}
+	return l.dotenvVars[key]
 }
 
 // durationType is used to detect time.Duration fields by named type before
@@ -284,77 +359,31 @@ func overwriteValue(tag reflect.StructTag, v *reflect.Value, setValue func(*refl
 }
 
 func (l *loader) setString(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok && def != "" {
-			v.SetString(strings.TrimSpace(def))
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if variable := l.getenv(val); variable != "" {
-			v.SetString(variable)
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.StringVar(v.Addr().Interface().(*string), val, v.String(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { v.SetString(strings.TrimSpace(s)); return nil },
+		func(name, usage string) { l.fs.StringVar(v.Addr().Interface().(*string), name, v.String(), usage) },
+	)
 }
 
 func (l *loader) setBool(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseBool(v, strings.ToLower(def))
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := l.getenv(val); value != "" {
-			if err := parseBool(v, value); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.BoolVar(v.Addr().Interface().(*bool), val, v.Bool(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseBool(v, s) },
+		func(name, usage string) { l.fs.BoolVar(v.Addr().Interface().(*bool), name, v.Bool(), usage) },
+	)
 }
 
 func (l *loader) setInt64(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseInt64(v, def)
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := l.getenv(val); value != "" {
-			if err := parseInt64(v, value); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Int64Var(v.Addr().Interface().(*int64), val, v.Int(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseInt64(v, s) },
+		func(name, usage string) { l.fs.Int64Var(v.Addr().Interface().(*int64), name, v.Int(), usage) },
+	)
 }
 
 func (l *loader) setInt(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseInt64(v, def)
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := l.getenv(val); value != "" {
-			if err := parseInt64(v, value); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.IntVar(v.Addr().Interface().(*int), val, int(v.Int()), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseInt64(v, s) },
+		func(name, usage string) { l.fs.IntVar(v.Addr().Interface().(*int), name, int(v.Int()), usage) },
+	)
 }
 
 // float32Flag implements flag.Value for float32 fields. The flag package has
@@ -373,84 +402,55 @@ func (f float32Flag) Set(s string) error {
 }
 
 func (l *loader) setFloat32(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseFloat(v, def, 32)
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := l.getenv(val); value != "" {
-			if err := parseFloat(v, value, 32); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Var(float32Flag{v}, val, getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseFloat(v, s, 32) },
+		func(name, usage string) { l.fs.Var(float32Flag{v}, name, usage) },
+	)
 }
 
 func (l *loader) setFloat64(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseFloat(v, def, 64)
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if value := l.getenv(val); value != "" {
-			if err := parseFloat(v, value, 64); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.Float64Var(v.Addr().Interface().(*float64), val, v.Float(), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseFloat(v, s, 64) },
+		func(name, usage string) { l.fs.Float64Var(v.Addr().Interface().(*float64), name, v.Float(), usage) },
+	)
 }
 
 func (l *loader) setDuration(v *reflect.Value, t reflect.StructTag) error {
-	if v.IsZero() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			_ = parseDuration(v, def)
-		}
-	}
-	if val, ok := t.Lookup(readEnvKey); ok {
-		if raw := l.getenv(val); raw != "" {
-			if err := parseDuration(v, raw); err != nil {
-				return err
-			}
-		}
-	}
-	if val, ok := t.Lookup(readFlagKey); ok {
-		l.fs.DurationVar(v.Addr().Interface().(*time.Duration), val, time.Duration(v.Int()), getUsage(t))
-	}
-	return nil
+	return l.applyField(v, t,
+		func(s string) error { return parseDuration(v, s) },
+		func(name, usage string) {
+			l.fs.DurationVar(v.Addr().Interface().(*time.Duration), name, time.Duration(v.Int()), usage)
+		},
+	)
 }
 
-// setStringSlice applies default → env to a []string field.
-// Values are parsed as a comma-separated list; whitespace around each entry
-// is trimmed. The flag tag is not supported for slice fields.
 func (l *loader) setStringSlice(v *reflect.Value, t reflect.StructTag) error {
 	if _, ok := t.Lookup(readFlagKey); ok {
 		return fmt.Errorf("flag tag is not supported for slice fields")
 	}
-	if !v.IsNil() {
+	raw := l.resolveSliceRaw(v, t)
+	if raw == "" {
 		return nil
 	}
-	var raw string
-	if val, ok := t.Lookup(readEnvKey); ok {
-		raw = l.getenv(val)
-	}
-	if raw == "" {
-		if def, ok := t.Lookup(defaultKey); ok {
-			raw = def
+	v.Set(reflect.ValueOf(splitTrimmed(raw)))
+	return nil
+}
+
+func (l *loader) resolveSliceRaw(v *reflect.Value, t reflect.StructTag) string {
+	if key, ok := t.Lookup(readEnvKey); ok {
+		if raw := l.getenv(key); raw != "" {
+			return raw
 		}
 	}
-	if raw == "" {
-		return nil
+	if v.IsNil() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			return def
+		}
 	}
+	return ""
+}
+
+func splitTrimmed(raw string) []string {
 	parts := strings.Split(raw, ",")
 	result := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -458,8 +458,7 @@ func (l *loader) setStringSlice(v *reflect.Value, t reflect.StructTag) error {
 			result = append(result, trimmed)
 		}
 	}
-	v.Set(reflect.ValueOf(result))
-	return nil
+	return result
 }
 
 func parseBool(v *reflect.Value, val string) error {

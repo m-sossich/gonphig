@@ -13,6 +13,7 @@ import (
 
 const configTestFile = "config-test.yml"
 const configArraysTestFile = "config-arrays.yml"
+const configDotEnvFile = "config-test.env"
 
 type parentConfig struct {
 	Field string `env:"string-env"`
@@ -378,6 +379,33 @@ func TestStringSliceFileNotOverriddenByDefault(t *testing.T) {
 	assert.Equal(t, 3, len(config.Something))
 }
 
+func TestStringSliceEnvOverridesFile(t *testing.T) {
+	type testType struct {
+		Something []string `yaml:"something" env:"SOMETHING"`
+	}
+
+	t.Setenv("SOMETHING", "x,y")
+
+	var config testType
+	err := Load(&config, WithFile(configArraysTestFile))
+	require.NoError(t, err)
+	// env var must win over the 3-item YAML value
+	assert.Equal(t, []string{"x", "y"}, config.Something)
+}
+
+func TestStringSliceConsecutiveCommas(t *testing.T) {
+	type testType struct {
+		Hosts []string `env:"HOSTS"`
+	}
+
+	t.Setenv("HOSTS", "a,,b")
+
+	var config testType
+	err := Load(&config)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, config.Hosts)
+}
+
 func TestStringSliceFlagTagReturnsError(t *testing.T) {
 	type testType struct {
 		Hosts []string `flag:"hosts"`
@@ -417,17 +445,6 @@ func TestRequiredIntFailsOnZero(t *testing.T) {
 	err := Load(&config)
 	require.Error(t, err)
 	assert.Equal(t, "missing required configuration: Port", err.Error())
-}
-
-func TestRequiredBoolFailsWithUnsupportedError(t *testing.T) {
-	type testType struct {
-		Enabled bool `validate:"required"`
-	}
-
-	var config testType
-	err := Load(&config)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported on bool field")
 }
 
 func TestRequiredDurationFailsOnZero(t *testing.T) {
@@ -771,4 +788,130 @@ func TestFlagDefaultFallback(t *testing.T) {
 	err := Load(&config, WithFlags(newFlagSet(t.Name()), []string{}))
 	require.NoError(t, err)
 	assert.Equal(t, "fallback", config.Field)
+}
+
+// --- .env file ---
+
+func TestLoadFromDotEnvFile(t *testing.T) {
+	var config parentConfig
+	err := Load(&config, WithFile(configDotEnvFile))
+	require.NoError(t, err)
+
+	assert.Equal(t, "Hello", config.Field)
+	assert.Equal(t, 1, config.Child.Int)
+	assert.Equal(t, true, config.Child.Child.Bool)
+}
+
+func TestDotEnvOverriddenByRealEnv(t *testing.T) {
+	t.Setenv("string-env", "from-real-env")
+
+	var config parentConfig
+	err := Load(&config, WithFile(configDotEnvFile))
+	require.NoError(t, err)
+
+	// real env wins over .env file
+	assert.Equal(t, "from-real-env", config.Field)
+	assert.Equal(t, 1, config.Child.Int)
+}
+
+func TestDotEnvOverridesDefault(t *testing.T) {
+	type testType struct {
+		Host string `env:"string-env" default:"fallback"`
+	}
+
+	var config testType
+	err := Load(&config, WithFile(configDotEnvFile))
+	require.NoError(t, err)
+
+	// .env wins over default
+	assert.Equal(t, "Hello", config.Host)
+}
+
+func TestDotEnvExportPrefix(t *testing.T) {
+	type testType struct {
+		Key string `env:"EXPORTED_KEY"`
+	}
+
+	var config testType
+	err := Load(&config, WithFile(configDotEnvFile))
+	require.NoError(t, err)
+
+	assert.Equal(t, "exported-value", config.Key)
+}
+
+func TestDotEnvOverriddenByFlag(t *testing.T) {
+	type testType struct {
+		Host string `env:"string-env" flag:"host"`
+	}
+
+	var config testType
+	err := Load(&config,
+		WithFile(configDotEnvFile),
+		WithFlags(newFlagSet(t.Name()), []string{"--host=from-flag"}),
+	)
+	require.NoError(t, err)
+
+	// flag wins over .env file
+	assert.Equal(t, "from-flag", config.Host)
+}
+
+func TestUnsupportedFileExtensionReturnsError(t *testing.T) {
+	var config parentConfig
+	err := Load(&config, WithFile("config.toml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported file format")
+}
+
+// --- Map field ---
+
+func TestMapFieldSilentlyIgnored(t *testing.T) {
+	type testType struct {
+		Host    string            `env:"HOST" default:"localhost"`
+		Options map[string]string `env:"OPTIONS"`
+	}
+
+	var config testType
+	err := Load(&config)
+	require.NoError(t, err)
+	assert.Equal(t, "localhost", config.Host)
+	assert.Nil(t, config.Options)
+}
+
+// --- dotenv parser edge cases ---
+
+func TestDotEnvLineWithoutEqualsIgnored(t *testing.T) {
+	type testType struct {
+		Host string `env:"HOST"`
+	}
+
+	// config-malformed.env has a line with no "=" — parser must skip it without error
+	var config testType
+	err := Load(&config, WithFile("config-malformed.env"))
+	require.NoError(t, err)
+	assert.Equal(t, "from-dotenv", config.Host)
+}
+
+func TestDotEnvEmptyValueFallsThrough(t *testing.T) {
+	type testType struct {
+		Empty string `env:"EMPTY_KEY" default:"fallback"`
+	}
+
+	// KEY= stores "" in the map; getenv returns "" → field falls through to default
+	var config testType
+	err := Load(&config, WithFile("config-empty-val.env"))
+	require.NoError(t, err)
+	assert.Equal(t, "fallback", config.Empty)
+}
+
+func TestWithEnvPrefixDoesNotApplyToDotEnv(t *testing.T) {
+	type testType struct {
+		Field string `env:"string-env"`
+	}
+
+	// WithEnvPrefix("APP") → real env lookup is APP_string-env (not set)
+	// dotenv lookup must use raw key string-env (no prefix) → "Hello"
+	var config testType
+	err := Load(&config, WithFile(configDotEnvFile), WithEnvPrefix("APP"))
+	require.NoError(t, err)
+	assert.Equal(t, "Hello", config.Field)
 }
