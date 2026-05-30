@@ -22,7 +22,7 @@
 //
 //   - flag:"name"         bind to a CLI flag (requires WithFlags or WithArgs)
 //   - flag-usage:"txt"    usage string shown in --help (optional, use with flag)
-//   - env:"VAR"           bind to an environment variable
+//   - env:"VAR"           bind to an environment variable or .env key
 //   - default:"val"       fallback when no higher-priority source sets the field
 //   - validate:"required" return an error if the field is zero after loading
 //   - yaml:"name"         rename the field when reading from a YAML file
@@ -55,12 +55,11 @@ const (
 type Option func(*settings)
 
 type settings struct {
-	filePath  string
-	hasFile   bool
-	fs        *flag.FlagSet
-	args      []string
-	hasFlags  bool
-	envPrefix string
+	filePath string
+	hasFile  bool
+	fs       *flag.FlagSet
+	args     []string
+	hasFlags bool
 }
 
 // WithFile enables a file as a configuration source, dispatching to the
@@ -101,15 +100,6 @@ func WithFlags(fs *flag.FlagSet, args []string) Option {
 	}
 }
 
-// WithEnvPrefix prepends prefix (uppercased, separated by "_") to every env
-// var lookup. A field tagged env:"HOST" with WithEnvPrefix("APP") will look
-// up APP_HOST in the environment.
-func WithEnvPrefix(prefix string) Option {
-	return func(s *settings) {
-		s.envPrefix = strings.ToUpper(strings.TrimRight(prefix, "_"))
-	}
-}
-
 // Bootstrap loads configuration into c exactly like Load, but panics on error.
 // Intended for use in main functions where a config failure is unrecoverable.
 //
@@ -141,7 +131,7 @@ func Load(c any, opts ...Option) error {
 	if err != nil {
 		return err
 	}
-	l := &loader{fs: s.fs, envPrefix: s.envPrefix}
+	l := &loader{fs: s.fs}
 	if err := l.loadFile(c, s); err != nil {
 		return err
 	}
@@ -225,11 +215,10 @@ func (l *loader) applyFields(c any) error {
 	return nil
 }
 
-// loader carries per-Load context (FlagSet, env prefix, dotenv values) so it
-// does not need to be threaded through every setter function signature.
+// loader carries per-Load context (FlagSet, dotenv values) so it does not
+// need to be threaded through every setter function signature.
 type loader struct {
 	fs         *flag.FlagSet
-	envPrefix  string
 	dotenvVars map[string]string
 }
 
@@ -267,14 +256,9 @@ func (l *loader) applyField(v *reflect.Value, t reflect.StructTag, parse func(st
 	return nil
 }
 
-// getenv looks up key in the environment. Priority: real env var (with prefix
-// when set) → .env file value (raw key, no prefix) → "".
+// getenv looks up key in the environment, falling back to .env file values.
 func (l *loader) getenv(key string) string {
-	envKey := key
-	if l.envPrefix != "" {
-		envKey = l.envPrefix + "_" + key
-	}
-	if val := os.Getenv(envKey); val != "" {
+	if val := os.Getenv(key); val != "" {
 		return val
 	}
 	return l.dotenvVars[key]

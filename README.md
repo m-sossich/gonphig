@@ -29,16 +29,15 @@ type Config struct {
 }
 
 var cfg Config
-if err := gonphig.Load(&cfg, gonphig.WithEnvPrefix("APP")); err != nil {
+if err := gonphig.Load(&cfg); err != nil {
     log.Fatal(err)
 }
-// reads APP_HOST, APP_PORT, APP_TIMEOUT, APP_API_KEY from the environment
 ```
 
 For `main` functions where a config failure is fatal, use `Bootstrap` — it panics instead of returning an error:
 
 ```go
-gonphig.Bootstrap(&cfg, gonphig.WithEnvPrefix("APP"))
+gonphig.Bootstrap(&cfg)
 ```
 
 ---
@@ -101,31 +100,12 @@ if err := gonphig.Load(&cfg); err != nil {
 }
 ```
 
-### Environment variable prefix
-
-Use `WithEnvPrefix` to namespace all env var lookups under a common prefix. The prefix is uppercased automatically and separated from the key with `_`.
-
-```go
-// With WithEnvPrefix("APP"):
-// env:"HOST"    → looks up APP_HOST
-// env:"DB_URL"  → looks up APP_DB_URL
-
-if err := gonphig.Load(&cfg, gonphig.WithEnvPrefix("APP")); err != nil {
-    log.Fatal(err)
-}
-```
-
-The prefix applies to OS environment variables only. Keys in `.env` files are always matched against the raw `env` tag value — no prefix is applied.
-
 ### YAML file
 
 Pass any `.yml` or `.yaml` path to `WithFile`. YAML is the lowest-priority source — env vars, `.env` files, defaults, and flags always override it.
 
 ```go
-if err := gonphig.Load(&cfg,
-    gonphig.WithFile("config.yml"),
-    gonphig.WithEnvPrefix("APP"),
-); err != nil {
+if err := gonphig.Load(&cfg, gonphig.WithFile("config.yml")); err != nil {
     log.Fatal(err)
 }
 ```
@@ -190,7 +170,7 @@ export API_KEY=secret   # export prefix is stripped
 EMPTY_KEY=              # empty value — treated as not set, field uses next priority
 ```
 
-Quotes and variable expansion (`$VAR`) are not supported. `WithEnvPrefix` does **not** apply to `.env` keys — they are matched against the raw `env` tag value.
+Quotes and variable expansion (`$VAR`) are not supported.
 
 ### CLI flags
 
@@ -235,9 +215,8 @@ All options can be combined. Gonphig applies them in priority order regardless o
 ```go
 var cfg Config
 gonphig.Bootstrap(&cfg,
-    gonphig.WithFile("config.yml"),      // lowest priority
-    gonphig.WithEnvPrefix("APP"),        // prefixes all env var lookups
-    gonphig.WithArgs(os.Args[1:]),       // highest priority
+    gonphig.WithFile("config.yml"),   // lowest priority
+    gonphig.WithArgs(os.Args[1:]),    // highest priority
 )
 ```
 
@@ -350,7 +329,7 @@ Parse errors always include the field name, making it straightforward to identif
 
 **`bool` and `validate:"required"` are incompatible.** `false` is the zero value for `bool` AND a valid intentional configuration value. There is no way to distinguish "not set" from "explicitly set to false", so requiring a bool to be set is a meaningless constraint. Gonphig returns an error at load time if you try.
 
-**`WithEnvPrefix` does not apply to `.env` files.** The prefix is an OS-level convention for namespacing env vars in a shared environment. `.env` files are developer-controlled local overrides — they contain explicit keys, not prefixed ones.
+**No env var prefix.** The `env` tag holds the full, exact env var name — what you write is what gets looked up. This makes structs self-documenting: you can read any field and know exactly what env var it reads without needing to track a runtime prefix option.
 
 ---
 

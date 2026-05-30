@@ -518,109 +518,6 @@ func TestWithArgsInvalidFlagReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- WithEnvPrefix ---
-
-func TestWithEnvPrefix(t *testing.T) {
-	type testType struct {
-		Host string `env:"HOST"`
-		Port int    `env:"PORT" default:"8080"`
-	}
-
-	t.Setenv("APP_HOST", "prefixed-host")
-	t.Setenv("APP_PORT", "9090")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("APP"))
-	require.NoError(t, err)
-	assert.Equal(t, "prefixed-host", config.Host)
-	assert.Equal(t, 9090, config.Port)
-}
-
-func TestWithEnvPrefixDoesNotMatchUnprefixed(t *testing.T) {
-	type testType struct {
-		Host string `env:"HOST" default:"fallback"`
-	}
-
-	t.Setenv("HOST", "unprefixed")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("APP"))
-	require.NoError(t, err)
-	// APP_HOST is not set, so default is used — unprefixed HOST is ignored
-	assert.Equal(t, "fallback", config.Host)
-}
-
-func TestWithEnvPrefixUppercasesPrefix(t *testing.T) {
-	type testType struct {
-		Host string `env:"HOST"`
-	}
-
-	t.Setenv("APP_HOST", "ok")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("app"))
-	require.NoError(t, err)
-	assert.Equal(t, "ok", config.Host)
-}
-
-func TestWithEnvPrefixNestedStruct(t *testing.T) {
-	type testType struct {
-		DB struct {
-			Host string `env:"HOST"`
-			Port int    `env:"PORT"`
-		}
-	}
-
-	t.Setenv("APP_HOST", "db-host")
-	t.Setenv("APP_PORT", "5432")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("APP"))
-	require.NoError(t, err)
-	assert.Equal(t, "db-host", config.DB.Host)
-	assert.Equal(t, 5432, config.DB.Port)
-}
-
-func TestWithEnvPrefixDuration(t *testing.T) {
-	type testType struct {
-		Timeout time.Duration `env:"TIMEOUT"`
-	}
-
-	t.Setenv("SVC_TIMEOUT", "10s")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("SVC"))
-	require.NoError(t, err)
-	assert.Equal(t, 10*time.Second, config.Timeout)
-}
-
-func TestWithEnvPrefixStringSlice(t *testing.T) {
-	type testType struct {
-		Hosts []string `env:"HOSTS"`
-	}
-
-	t.Setenv("SVC_HOSTS", "a,b,c")
-
-	var config testType
-	err := Load(&config, WithEnvPrefix("SVC"))
-	require.NoError(t, err)
-	assert.Equal(t, []string{"a", "b", "c"}, config.Hosts)
-}
-
-func TestWithEnvPrefixWithFile(t *testing.T) {
-	type testType struct {
-		Field string `yaml:"field" env:"FIELD"`
-	}
-
-	t.Setenv("APP_FIELD", "from-env")
-
-	var config testType
-	err := Load(&config, WithFile(configTestFile), WithEnvPrefix("APP"))
-	require.NoError(t, err)
-	// Env wins over YAML
-	assert.Equal(t, "from-env", config.Field)
-}
-
 // --- Error messages include field name ---
 
 func TestParseErrorIncludesFieldName(t *testing.T) {
@@ -709,13 +606,13 @@ func TestBootstrapWithOptions(t *testing.T) {
 		Host string `env:"HOST" default:"localhost"`
 	}
 
-	t.Setenv("APP_HOST", "prefixed")
+	t.Setenv("HOST", "from-env")
 
 	var config testType
 	assert.NotPanics(t, func() {
-		Bootstrap(&config, WithEnvPrefix("APP"))
+		Bootstrap(&config, WithFile(configDotEnvFile))
 	})
-	assert.Equal(t, "prefixed", config.Host)
+	assert.Equal(t, "from-env", config.Host)
 }
 
 func TestBootstrapSucceeds(t *testing.T) {
@@ -903,15 +800,3 @@ func TestDotEnvEmptyValueFallsThrough(t *testing.T) {
 	assert.Equal(t, "fallback", config.Empty)
 }
 
-func TestWithEnvPrefixDoesNotApplyToDotEnv(t *testing.T) {
-	type testType struct {
-		Field string `env:"string-env"`
-	}
-
-	// WithEnvPrefix("APP") → real env lookup is APP_string-env (not set)
-	// dotenv lookup must use raw key string-env (no prefix) → "Hello"
-	var config testType
-	err := Load(&config, WithFile(configDotEnvFile), WithEnvPrefix("APP"))
-	require.NoError(t, err)
-	assert.Equal(t, "Hello", config.Field)
-}
