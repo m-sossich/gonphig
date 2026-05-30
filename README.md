@@ -190,6 +190,8 @@ type Config struct {
 HOSTS=host1, host2, host3  →  []string{"host1", "host2", "host3"}
 ```
 
+`time.Duration` values accept any string understood by `time.ParseDuration` (`"5s"`, `"1m30s"`, etc.) in all sources. In YAML, always use the string form — a bare integer zero (`timeout: 0`) is rejected; write `timeout: 0s` instead.
+
 Unsupported field types (channels, funcs, etc.) return an error at load time.
 
 ## Error handling

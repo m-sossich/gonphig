@@ -12,7 +12,8 @@
 // string, int, int64, float32, float64, bool, time.Duration, and []string are
 // supported. []string values are read as comma-separated strings from env vars
 // and the default tag. time.Duration values accept any string understood by
-// time.ParseDuration (e.g. "5s", "1m30s").
+// time.ParseDuration (e.g. "5s", "1m30s"). In YAML, always use the string
+// form — a bare integer zero (timeout: 0) is rejected; write timeout: 0s.
 //
 // # Struct tags
 //
