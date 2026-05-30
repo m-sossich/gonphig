@@ -420,25 +420,33 @@ func (l *loader) setDuration(v *reflect.Value, t reflect.StructTag) error {
 	)
 }
 
-// setStringSlice applies default → env to a []string field.
-// Values are parsed as a comma-separated list; whitespace around each entry
-// is trimmed. The flag tag is not supported for slice fields.
 func (l *loader) setStringSlice(v *reflect.Value, t reflect.StructTag) error {
 	if _, ok := t.Lookup(readFlagKey); ok {
 		return fmt.Errorf("flag tag is not supported for slice fields")
 	}
-	var raw string
-	if val, ok := t.Lookup(readEnvKey); ok {
-		raw = l.getenv(val)
-	}
-	if raw == "" && v.IsNil() {
-		if def, ok := t.Lookup(defaultKey); ok {
-			raw = def
-		}
-	}
+	raw := l.resolveSliceRaw(v, t)
 	if raw == "" {
 		return nil
 	}
+	v.Set(reflect.ValueOf(splitTrimmed(raw)))
+	return nil
+}
+
+func (l *loader) resolveSliceRaw(v *reflect.Value, t reflect.StructTag) string {
+	if key, ok := t.Lookup(readEnvKey); ok {
+		if raw := l.getenv(key); raw != "" {
+			return raw
+		}
+	}
+	if v.IsNil() {
+		if def, ok := t.Lookup(defaultKey); ok {
+			return def
+		}
+	}
+	return ""
+}
+
+func splitTrimmed(raw string) []string {
 	parts := strings.Split(raw, ",")
 	result := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -446,8 +454,7 @@ func (l *loader) setStringSlice(v *reflect.Value, t reflect.StructTag) error {
 			result = append(result, trimmed)
 		}
 	}
-	v.Set(reflect.ValueOf(result))
-	return nil
+	return result
 }
 
 func parseBool(v *reflect.Value, val string) error {
