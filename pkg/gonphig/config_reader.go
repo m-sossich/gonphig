@@ -3,6 +3,9 @@
 // CLI flags (highest) → environment variables → .env file → struct tag
 // defaults → YAML file (lowest).
 //
+// .env files are resolved via the env struct tag — fields without an env tag
+// are not reachable from a .env file.
+//
 // The single entry point is Load. Environment variables and struct tag
 // defaults are always considered. Additional sources — YAML files and CLI
 // flags — are enabled via options.

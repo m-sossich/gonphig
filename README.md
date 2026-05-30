@@ -47,8 +47,9 @@ Sources are evaluated in this order — higher entries win:
 |----------|--------|---------------|
 | 1 (highest) | CLI flag | `WithArgs(args)` or `WithFlags(fs, args)` + `flag:"name"` tag |
 | 2 | Environment variable | always on — `env:"VAR"` tag |
-| 3 | Struct tag default | always on — `default:"value"` tag |
-| 4 (lowest) | YAML file | `WithFile("path")` option |
+| 3 | `.env` file | `WithFile(".env")` + `env:"VAR"` tag |
+| 4 | Struct tag default | always on — `default:"value"` tag |
+| 5 (lowest) | YAML file | `WithFile("path.yml")` option |
 
 ## How to use it
 
@@ -100,6 +101,28 @@ type Config struct {
     DatabaseURL string `yaml:"database_url" env:"DATABASE_URL"`
 }
 ```
+
+### .env file
+
+`.env` values sit between real environment variables and struct tag defaults — real env vars always win, defaults only apply when neither the environment nor the `.env` file provides a value.
+
+```go
+if err := gonphig.Load(&cfg, gonphig.WithFile(".env")); err != nil {
+    log.Fatal(err)
+}
+```
+
+`.env` files are resolved via the `env` tag — only fields with an `env:"VAR"` tag are reachable from a `.env` file. Fields with only a `yaml:` tag are not.
+
+Supported syntax:
+
+```
+# comment
+KEY=value
+export KEY=value   # export prefix is stripped
+```
+
+Quotes and variable expansion are not supported. `WithEnvPrefix` applies to real environment variables only — keys in `.env` files are matched against the raw `env` tag value without the prefix.
 
 ### CLI flags
 
